@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  arch-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: arch-mcp-server
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
