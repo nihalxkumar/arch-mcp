@@ -1,17 +1,6 @@
-version: '1.0'
-
-variables:
-  VERSION: "0.1.0"
-  IMAGE_NAME: "nihalxkumar/arch-ops-server"
-
-builds:
-  server:
-    name: "{{ vars.IMAGE_NAME }}"
-
-    context: .
-
-    dockerfile: Dockerfile
-
-    tags:
-      - "{{ vars.VERSION }}"
-      - "latest"
+runtime: "container"
+build:
+  dockerfile: "DOCKERFILE"
+  dockerBuildPath: "."
+startCommand:
+  type: "http"
