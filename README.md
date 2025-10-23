@@ -48,33 +48,13 @@ Direct access to Arch ecosystem data via custom URI schemes:
 
 ### Prerequisites
 - Python 3.11+
-- [uv](https://github.com/astral-sh/uv) (recommended)
-- Git
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
-### Install with `uv` (Recommended)
-
-```bash
-git clone https://github.com/nihalxkumar/arch-mcp.git
-cd arch-mcp
-uv sync
-uv run python arch_ops_server.py
-```
-
-### Install with `pip`
-
-<details>
-<summary>Expand for pip instructions</summary>
+### Quick Install with `uvx`
 
 ```bash
-git clone https://github.com/nihalxkumar/arch-mcp.git
-cd arch-mcp
-python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-pip install -e .
-python arch_ops_server.py
+uvx arch-ops-server
 ```
-
-</details>
 
 ---
 
@@ -82,20 +62,12 @@ python arch_ops_server.py
 
 Claude / Cursor / Any MCP client that supports STDIO transport
 
-Make sure to specify the correct absolute path to the arch-mcp directory.
-
 ```json
 {
   "mcpServers": {
     "arch-ops": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/absolute/path/to/arch-mcp",
-        "run",
-        "python",
-        "arch_ops_server.py"
-      ]
+      "command": "uvx",
+      "args": ["arch-ops-server"]
     }
   }
 }

@@ -2,10 +2,23 @@
 name = "arch-ops-server"
 version = "0.1.0"
 description = "MCP server bridging AI assistants with Arch Linux ecosystem (Wiki, AUR, official repos)"
-readme = "README.md"
+readme = {file = "README.md", content-type = "text/markdown"}
 license = { text = "GPL-3.0" }
 authors = [
     { name = "Nihal", email = "2tv8xupqg@mozmail.com" }
+]
+keywords = ["arch-linux", "mcp", "model-context-protocol", "aur", "pacman", "wiki", "ai-assistant"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Archiving :: Packaging",
+    "Topic :: System :: Systems Administration",
 ]
 requires-python = ">=3.11"
 dependencies = [
@@ -17,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-arch-ops-server = "arch_ops_server:main"
+arch-ops-server = "arch_ops_server:main_sync"
 
 [build-system]
 requires = ["uv_build>=0.9.4,<0.10.0"]

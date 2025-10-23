@@ -18,7 +18,41 @@ from .aur import (
     install_package_secure
 )
 from .pacman import get_official_package_info, check_updates_dry_run
-from .utils import IS_ARCH
+from .utils import IS_ARCH, run_command
+
+# Import server from the server module
+from .server import server
+
+# Main function will be defined here
+async def main():
+    """
+    Main entry point for the MCP server.
+    Runs the server using STDIO transport.
+    """
+    import asyncio
+    import mcp.server.stdio
+    import logging
+    
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    logger.info("Starting Arch Linux MCP Server")
+    logger.info(f"Running on Arch Linux: {IS_ARCH}")
+    
+    # Run the server using STDIO
+    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options()
+        )
+
+
+def main_sync():
+    """Synchronous wrapper for the main function."""
+    import asyncio
+    asyncio.run(main())
 
 __all__ = [
     # Wiki
@@ -38,4 +72,8 @@ __all__ = [
     "check_updates_dry_run",
     # Utils
     "IS_ARCH",
+    "run_command",
+    # Main functions
+    "main",
+    "main_sync",
 ]
