@@ -1,5 +1,7 @@
 # Arch Linux MCP Server
 
+
+
 **Disclaimer:** Unofficial community project, not affiliated with Arch Linux.
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that bridges AI assistants with the Arch Linux ecosystem. Enables intelligent, safe, and efficient access to the Arch Wiki, AUR, and official repositories for AI-assisted Arch Linux usage on Arch and non-Arch systems.
@@ -55,7 +57,6 @@ Direct access to Arch ecosystem data via custom URI schemes:
 ```bash
 uvx arch-ops-server
 ```
-
 ---
 
 ## Configuration
@@ -73,11 +74,16 @@ Claude / Cursor / Any MCP client that supports STDIO transport
 }
 ```
 
+If you are using Cursor, you can easily install and configure the MCP server by clicking the button below:
+
+[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](cursor://anysphere.cursor-deeplink/mcp/install?name=arch-ops&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJhcmNoLW9wcy1zZXJ2ZXIiXX0=)
+
+## Contributing
+
+Contibutions are greatly appreciated. Please feel free to submit a pull request or open an issue and help make things better for everyone.
+
+[Contributing Guide](https://nxk.mintlify.app/arch-mcp/contributing)
+
 ## License
 
 [GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.en.html)
-
----
-
-
-Built with ❤️ for the Arch Linux community
