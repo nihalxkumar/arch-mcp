@@ -381,7 +381,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     
     elif name == "analyze_package_metadata_risk":
         package_info = arguments["package_info"]
-        result = await analyze_package_metadata_risk(package_info)
+        result = analyze_package_metadata_risk(package_info)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
     else:
@@ -513,7 +513,7 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             pkgbuild_content = await get_pkgbuild(package_name)
             
             # Analyze both metadata and PKGBUILD
-            metadata_risk = await analyze_package_metadata_risk(package_info)
+            metadata_risk = analyze_package_metadata_risk(package_info)
             pkgbuild_safety = analyze_pkgbuild_safety(pkgbuild_content)
             
             audit_summary = f"""
