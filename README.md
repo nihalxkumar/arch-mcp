@@ -15,18 +15,14 @@ Leverage AI to get  output for digestible, structured results that are ready for
 <details open>
 <summary>Claude Desktop (no terminal)</summary>
 
-<video src="assets/claudedesktop_signalcli.mp4" width="800" controls muted>
-  <a href="assets/claudedesktop_signalcli.mp4">here</a>.
-</video>
+![Claude Desktop Demo](assets/claudedesktop_signalcli.gif)
 
 </details>
 
 <details>
 <summary>VS Code (with terminal)</summary>
 
-<video src="assets/vscode_notesnook.mp4" width="800" controls muted>
-  <a href="assets/vscode_notesnook.mp4">here</a>.
-</video>
+![VS Code Demo](assets/vscode_notesnook.gif)
 
 </details>
 
