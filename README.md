@@ -16,7 +16,6 @@ Leverage AI to get  output for digestible, structured results that are ready for
 <summary>Claude Desktop (no terminal)</summary>
 
 <video src="assets/claudedesktop_signalcli.mp4" width="800" controls muted>
-  Your browser does not support the video tag. You can download the video or check again later later at https://nxk.mintlify.app/arch-mcp.
   <a href="assets/claudedesktop_signalcli.mp4">here</a>.
 </video>
 
@@ -26,7 +25,6 @@ Leverage AI to get  output for digestible, structured results that are ready for
 <summary>VS Code (with terminal)</summary>
 
 <video src="assets/vscode_notesnook.mp4" width="800" controls muted>
-  Your browser does not support the video tag. You can download the video or check again later later at https://nxk.mintlify.app/arch-mcp.
   <a href="assets/vscode_notesnook.mp4">here</a>.
 </video>
 
