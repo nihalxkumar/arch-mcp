@@ -1,5 +1,9 @@
 # Arch Linux MCP Server
 
+<a href="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp/badge" />
+</a>
+
 **Disclaimer:** Unofficial community project, not affiliated with Arch Linux.
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that bridges AI assistants with the Arch Linux ecosystem. Enables intelligent, safe, and efficient access to the Arch Wiki, AUR, and official repositories for AI-assisted Arch Linux usage on Arch and non-Arch systems.
@@ -74,10 +78,6 @@ Claude / Cursor / Any MCP client that supports STDIO transport
   }
 }
 ```
-
-If you are using Cursor, you can easily install and configure the MCP server by clicking the button below:
-
-[![Add to Cursor](https://img.shields.io/badge/Add%20to%20Cursor-000000?style=for-the-badge&logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=arch-ops&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJhcmNoLW9wcy1zZXJ2ZXIiXX0=)
 
 ## Contributing
 
