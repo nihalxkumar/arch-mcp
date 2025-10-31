@@ -1,6 +1,8 @@
 # Arch Linux MCP Server
 
-
+<a href="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp/badge" />
+</a>
 
 **Disclaimer:** Unofficial community project, not affiliated with Arch Linux.
 
@@ -87,10 +89,6 @@ Claude / Cursor / Any MCP client that supports STDIO transport
   }
 }
 ```
-
-If you are using Cursor, you can easily install and configure the MCP server by clicking the button below:
-
-[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](cursor://anysphere.cursor-deeplink/mcp/install?name=arch-ops&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJhcmNoLW9wcy1zZXJ2ZXIiXX0=)
 
 ## Contributing
 
