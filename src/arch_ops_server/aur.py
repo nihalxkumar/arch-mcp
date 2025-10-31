@@ -680,6 +680,41 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
     }
     
     # ========================================================================
+    # STEP 0: Verify sudo is configured properly
+    # ========================================================================
+    logger.info("[STEP 0/5] Verifying sudo configuration...")
+    
+    # Test if sudo password is cached or passwordless sudo is configured
+    # Use skip_sudo_check=True to avoid recursive check
+    test_exit_code, _, test_stderr = await run_command(
+        ["sudo", "-n", "true"],
+        timeout=5,
+        check=False,
+        skip_sudo_check=True
+    )
+    
+    if test_exit_code != 0:
+        result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
+        result["messages"].append("")
+        result["messages"].append("Package installation requires sudo privileges.")
+        result["messages"].append("Please choose one of these options:")
+        result["messages"].append("")
+        result["messages"].append("Option 1: Configure passwordless sudo for pacman:")
+        result["messages"].append("  sudo visudo -f /etc/sudoers.d/arch-package-install")
+        result["messages"].append("  Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
+        result["messages"].append("")
+        result["messages"].append("Option 2: Cache sudo password temporarily:")
+        result["messages"].append("  Run: sudo -v")
+        result["messages"].append("  Then retry the installation")
+        result["messages"].append("")
+        result["messages"].append("Option 3: Install manually in terminal:")
+        result["messages"].append(f"  sudo pacman -S {package_name}")
+        result["security_checks"]["decision"] = "SUDO_REQUIRED"
+        return result
+    
+    result["messages"].append("✅ Sudo privileges verified")
+    
+    # ========================================================================
     # STEP 1: Check if package is in official repos first
     # ========================================================================
     logger.info(f"[STEP 1/5] Checking if '{package_name}' is in official repos...")
@@ -713,6 +748,17 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
             else:
                 result["messages"].append(f"❌ Installation failed: {stderr}")
                 logger.error(f"pacman installation failed: {stderr}")
+                
+                # Check for sudo password issues
+                if "password" in stderr.lower() or "sudo" in stderr.lower():
+                    result["messages"].append("")
+                    result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
+                    result["messages"].append("To enable passwordless installation, run one of these commands:")
+                    result["messages"].append("1. For passwordless sudo (less secure):")
+                    result["messages"].append("   sudo visudo -f /etc/sudoers.d/arch-package-install")
+                    result["messages"].append("   Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
+                    result["messages"].append("2. Or run the installation manually in your terminal:")
+                    result["messages"].append(f"   sudo pacman -S {package_name}")
                 
             result["install_output"] = stdout
             result["install_errors"] = stderr
@@ -846,6 +892,17 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
             result["messages"].append(f"   Error: {stderr}")
             result["security_checks"]["decision"] = "INSTALL_FAILED"
             logger.error(f"AUR installation failed for {package_name}: {stderr}")
+            
+            # Check for sudo password issues
+            if "password" in stderr.lower() or "sudo" in stderr.lower():
+                result["messages"].append("")
+                result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
+                result["messages"].append("To enable passwordless installation for AUR packages:")
+                result["messages"].append("1. For passwordless sudo for pacman:")
+                result["messages"].append("   sudo visudo -f /etc/sudoers.d/arch-aur-install")
+                result["messages"].append("   Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
+                result["messages"].append("2. Or run the installation manually in your terminal:")
+                result["messages"].append(f"   {aur_helper} -S {package_name}")
         
         result["install_output"] = stdout
         result["install_errors"] = stderr

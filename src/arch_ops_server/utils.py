@@ -57,15 +57,20 @@ IS_ARCH = is_arch_linux()
 async def run_command(
     cmd: list[str],
     timeout: int = 10,
-    check: bool = True
+    check: bool = True,
+    skip_sudo_check: bool = False
 ) -> tuple[int, str, str]:
     """
     Execute a command asynchronously with timeout protection.
+    
+    Note: For sudo commands, stdin is properly connected to allow password input
+    if passwordless sudo is not configured.
     
     Args:
         cmd: Command and arguments as list
         timeout: Timeout in seconds (default: 10)
         check: If True, raise exception on non-zero exit code
+        skip_sudo_check: If True, skip the early sudo password check (for testing)
     
     Returns:
         Tuple of (exit_code, stdout, stderr)
@@ -76,21 +81,56 @@ async def run_command(
     """
     logger.debug(f"Executing command: {' '.join(cmd)}")
     
+    # Check if this is a sudo command and if password is cached
+    is_sudo_command = cmd and cmd[0] == "sudo"
+    if is_sudo_command and not skip_sudo_check:
+        # Test if sudo password is cached (non-interactive mode)
+        test_cmd = ["sudo", "-n", "true"]
+        try:
+            test_process = await asyncio.create_subprocess_exec(
+                *test_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await test_process.communicate()
+            password_cached = test_process.returncode == 0
+            logger.debug(f"Sudo password cached: {password_cached}")
+            
+            if not password_cached:
+                logger.warning("Sudo password is required but not cached. "
+                              "Please run 'sudo pacman -S <package>' manually in the terminal.")
+                return (
+                    1,
+                    "",
+                    "Sudo password required. Please configure passwordless sudo for pacman/paru, "
+                    "or run the installation command manually in your terminal."
+                )
+        except Exception as e:
+            logger.warning(f"Could not check sudo status: {e}")
+            password_cached = False
+    else:
+        password_cached = True
+    
     try:
+        # Attach stdin to subprocess for commands that might need input
+        # Use asyncio.subprocess.PIPE to allow stdin interaction
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE if is_sudo_command else None
         )
         
+        # Communicate with the process
+        # For sudo commands, this allows password input if needed
         stdout, stderr = await asyncio.wait_for(
             process.communicate(),
             timeout=timeout
         )
         
         exit_code = process.returncode
-        stdout_str = stdout.decode('utf-8', errors='replace')
-        stderr_str = stderr.decode('utf-8', errors='replace')
+        stdout_str = stdout.decode('utf-8', errors='replace') if stdout else ""
+        stderr_str = stderr.decode('utf-8', errors='replace') if stderr else ""
         
         logger.debug(f"Command exit code: {exit_code}")
         
