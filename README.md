@@ -81,7 +81,7 @@ If you are using Cursor, you can easily install and configure the MCP server by 
 
 ## Contributing
 
-Contibutions are greatly appreciated. Please feel free to submit a pull request or open an issue and help make things better for everyone.
+Contributions are greatly appreciated. Please feel free to submit a pull request or open an issue and help make things better for everyone.
 
 [Contributing Guide](https://nxk.mintlify.app/arch-mcp/contributing)
 
