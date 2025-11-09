@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only OR MIT
 """
 Utility functions for Arch Linux MCP Server.
 Provides platform detection, subprocess execution, and error handling.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only OR MIT
 """
 Arch Wiki interface module.
 Provides search and page retrieval via MediaWiki API with BeautifulSoup fallback.
