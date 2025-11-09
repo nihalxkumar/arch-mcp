@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only OR MIT
 """
 AUR (Arch User Repository) interface module.
 Provides search, package info, and PKGBUILD retrieval via AUR RPC v5.

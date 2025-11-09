@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only OR MIT
 """
 MCP Server setup for Arch Linux operations.
 

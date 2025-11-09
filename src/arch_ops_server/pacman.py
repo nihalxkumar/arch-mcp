@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only OR MIT
 """
 Pacman/Official Repository interface module.
 Provides package info and update checks with hybrid local/remote approach.
