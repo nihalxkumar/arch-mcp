@@ -35,6 +35,13 @@ from .pacman import (
     mark_as_explicit,
     mark_as_dependency
 )
+from .system import (
+    get_system_info,
+    check_disk_space,
+    get_pacman_cache_stats,
+    check_failed_services,
+    get_boot_logs
+)
 from .utils import IS_ARCH, run_command
 
 # Import server from the server module
@@ -100,6 +107,12 @@ __all__ = [
     "list_explicit_packages",
     "mark_as_explicit",
     "mark_as_dependency",
+    # System
+    "get_system_info",
+    "check_disk_space",
+    "get_pacman_cache_stats",
+    "check_failed_services",
+    "get_boot_logs",
     # Utils
     "IS_ARCH",
     "run_command",
