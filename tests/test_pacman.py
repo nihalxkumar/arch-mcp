@@ -14,6 +14,7 @@ from arch_ops_server.pacman import (
     _parse_pacman_output,
     check_updates_dry_run,
     get_official_package_info,
+    check_database_freshness,
 )
 
 
@@ -386,3 +387,158 @@ gcc 12.2.0-1 -> 13.1.0-1
         assert len(result) == 1
         assert result[0]["package"] == "vim"
         assert result[0]["current_version"] == "9.0.1000-1"
+
+
+class TestDatabaseFreshness:
+    """Test package database freshness checking."""
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.pacman.IS_ARCH", True)
+    async def test_check_database_freshness_fresh(self, tmp_path):
+        """Test when databases are fresh (recently synced)."""
+        from datetime import datetime, timedelta
+        
+        # Create mock database files
+        sync_dir = tmp_path / "sync"
+        sync_dir.mkdir()
+        
+        # Create recent db files (1 hour old)
+        core_db = sync_dir / "core.db"
+        extra_db = sync_dir / "extra.db"
+        
+        core_db.write_text("fake db")
+        extra_db.write_text("fake db")
+        
+        # Set modification time to 1 hour ago
+        recent_time = (datetime.now() - timedelta(hours=1)).timestamp()
+        import os
+        os.utime(core_db, (recent_time, recent_time))
+        os.utime(extra_db, (recent_time, recent_time))
+        
+        with patch("arch_ops_server.pacman.Path") as mock_path:
+            mock_path.return_value.exists.return_value = True
+            mock_path.return_value.glob.return_value = [core_db, extra_db]
+            
+            result = await check_database_freshness()
+            
+            assert result["database_count"] == 2
+            assert result["needs_sync"] is False
+            assert result["oldest_age_hours"] < 2
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.pacman.IS_ARCH", True)
+    async def test_check_database_freshness_stale(self, tmp_path):
+        """Test when databases are stale (> 24 hours)."""
+        from datetime import datetime, timedelta
+        
+        # Create mock database files
+        sync_dir = tmp_path / "sync"
+        sync_dir.mkdir()
+        
+        # Create old db file (48 hours old)
+        core_db = sync_dir / "core.db"
+        core_db.write_text("fake db")
+        
+        # Set modification time to 48 hours ago
+        old_time = (datetime.now() - timedelta(hours=48)).timestamp()
+        import os
+        os.utime(core_db, (old_time, old_time))
+        
+        with patch("arch_ops_server.pacman.Path") as mock_path:
+            mock_path.return_value.exists.return_value = True
+            mock_path.return_value.glob.return_value = [core_db]
+            
+            result = await check_database_freshness()
+            
+            assert result["needs_sync"] is True
+            assert result["oldest_age_hours"] > 24
+            assert len(result["recommendations"]) > 0
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.pacman.IS_ARCH", True)
+    async def test_check_database_freshness_very_stale(self, tmp_path):
+        """Test when databases are very stale (> 1 week)."""
+        from datetime import datetime, timedelta
+        
+        # Create mock database files
+        sync_dir = tmp_path / "sync"
+        sync_dir.mkdir()
+        
+        # Create very old db file (10 days old)
+        core_db = sync_dir / "sync" / "core.db"
+        core_db.parent.mkdir(parents=True)
+        core_db.write_text("fake db")
+        
+        # Set modification time to 10 days ago
+        very_old_time = (datetime.now() - timedelta(days=10)).timestamp()
+        import os
+        os.utime(core_db, (very_old_time, very_old_time))
+        
+        with patch("arch_ops_server.pacman.Path") as mock_path:
+            mock_path.return_value.exists.return_value = True
+            mock_path.return_value.glob.return_value = [core_db]
+            
+            result = await check_database_freshness()
+            
+            assert result["needs_sync"] is True
+            assert result["oldest_age_hours"] > 168  # More than 1 week
+            # Should have recommendation about full system update
+            recommendations = " ".join(result["recommendations"]).lower()
+            assert "week" in recommendations or "system update" in recommendations
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.pacman.IS_ARCH", True)
+    async def test_check_database_freshness_multiple_repos(self, tmp_path):
+        """Test with multiple repository databases."""
+        from datetime import datetime, timedelta
+        
+        # Create mock database files with different ages
+        sync_dir = tmp_path / "sync"
+        sync_dir.mkdir()
+        
+        core_db = sync_dir / "core.db"
+        extra_db = sync_dir / "extra.db"
+        multilib_db = sync_dir / "multilib.db"
+        
+        core_db.write_text("fake db")
+        extra_db.write_text("fake db")
+        multilib_db.write_text("fake db")
+        
+        # Different ages
+        import os
+        now = datetime.now()
+        os.utime(core_db, ((now - timedelta(hours=2)).timestamp(),) * 2)
+        os.utime(extra_db, ((now - timedelta(hours=5)).timestamp(),) * 2)
+        os.utime(multilib_db, ((now - timedelta(hours=30)).timestamp(),) * 2)  # Stale
+        
+        with patch("arch_ops_server.pacman.Path") as mock_path:
+            mock_path.return_value.exists.return_value = True
+            mock_path.return_value.glob.return_value = [core_db, extra_db, multilib_db]
+            
+            result = await check_database_freshness()
+            
+            assert result["database_count"] == 3
+            # Oldest is multilib at 30 hours
+            assert result["oldest_age_hours"] > 24
+            assert result["needs_sync"] is True
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.pacman.IS_ARCH", False)
+    async def test_check_database_freshness_not_arch(self):
+        """Test on non-Arch system."""
+        result = await check_database_freshness()
+        
+        assert "error" in result
+        assert result["error"] == "NotSupported"
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.pacman.IS_ARCH", True)
+    async def test_check_database_freshness_no_sync_dir(self):
+        """Test when sync directory doesn't exist."""
+        with patch("arch_ops_server.pacman.Path") as mock_path:
+            mock_path.return_value.exists.return_value = False
+            
+            result = await check_database_freshness()
+            
+            assert "error" in result
+            assert result["error"] == "NotFound"
