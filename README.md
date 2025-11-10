@@ -39,6 +39,14 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `aur://*/info` | `aur://yay/info` | AUR package metadata (votes, maintainer, dates) |
 | `archrepo://` | `archrepo://vim` | Official repository package details |
 | `pacman://installed` | `pacman://installed` | System installed packages list (Arch only) |
+| `pacman://orphans` | `pacman://orphans` | Orphaned packages (Arch only) |
+| `pacman://explicit` | `pacman://explicit` | Explicitly installed packages (Arch only) |
+| `pacman://groups` | `pacman://groups` | All package groups (Arch only) |
+| `pacman://group/*` | `pacman://group/base-devel` | Packages in specific group (Arch only) |
+| `system://info` | `system://info` | System information (kernel, memory, uptime) |
+| `system://disk` | `system://disk` | Disk space usage statistics |
+| `system://services/failed` | `system://services/failed` | Failed systemd services |
+| `system://logs/boot` | `system://logs/boot` | Recent boot logs |
 
 ### Tools (Executable Functions)
 
@@ -47,8 +55,26 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | **Search** | `search_archwiki` | Query Arch Wiki documentation | Ranked results, keyword extraction |
 | | `search_aur` | Search AUR packages | Smart ranking: relevance/votes/popularity/modified |
 | | `get_official_package_info` | Lookup official packages | Hybrid local/remote, detailed metadata |
-| **System** | `check_updates_dry_run` | Check for updates (Arch only) | Read-only, safe, requires pacman-contrib |
+| **Updates** | `check_updates_dry_run` | Check for updates (Arch only) | Read-only, safe, requires pacman-contrib |
 | **Installation** | `install_package_secure` | Secure package installation | Auto security checks, blocks malicious packages, uses paru/yay |
+| **Removal** | `remove_package` | Remove single package | Options: with deps, forced removal |
+| | `remove_packages_batch` | Remove multiple packages | Efficient batch operations |
+| **Orphans** | `list_orphan_packages` | Find orphaned packages | Shows disk space usage |
+| | `remove_orphans` | Clean orphaned packages | Dry-run mode, exclusion list |
+| **Ownership** | `find_package_owner` | Find package owning a file | File-to-package mapping |
+| | `list_package_files` | List files in package | Optional regex filtering |
+| | `search_package_files` | Search files across packages | Requires `pacman -Fy` |
+| **Verification** | `verify_package_integrity` | Check package file integrity | Detects modified/missing files |
+| **Groups** | `list_package_groups` | List all package groups | e.g., base, base-devel |
+| | `list_group_packages` | Show packages in group | Group member listing |
+| **Install Reason** | `list_explicit_packages` | List user-installed packages | For backup/restore |
+| | `mark_as_explicit` | Mark as explicitly installed | Prevent orphan removal |
+| | `mark_as_dependency` | Mark as dependency | Allow orphan removal |
+| **System Info** | `get_system_info` | Get system information | Kernel, memory, uptime |
+| | `check_disk_space` | Check disk usage | Warns on low space |
+| | `get_pacman_cache_stats` | Analyze package cache | Cache size and age |
+| | `check_failed_services` | Find failed services | systemd service status |
+| | `get_boot_logs` | Retrieve boot logs | journalctl output |
 | **Security** | `analyze_pkgbuild_safety` | Comprehensive PKGBUILD analysis | Detects: malicious commands based on 50+ red flags |
 | | `analyze_package_metadata_risk` | Package trust evaluation | Analyzes: votes, maintainer, age, updates, trust scoring |
 

@@ -24,16 +24,39 @@ from mcp.types import (
 )
 
 from . import (
+    # Wiki functions
     search_wiki,
     get_wiki_page_as_text,
+    # AUR functions
     search_aur,
     get_aur_info,
     get_pkgbuild,
     analyze_pkgbuild_safety,
     analyze_package_metadata_risk,
+    install_package_secure,
+    # Pacman functions
     get_official_package_info,
     check_updates_dry_run,
-    install_package_secure,
+    remove_package,
+    remove_packages_batch,
+    list_orphan_packages,
+    remove_orphans,
+    find_package_owner,
+    list_package_files,
+    search_package_files,
+    verify_package_integrity,
+    list_package_groups,
+    list_group_packages,
+    list_explicit_packages,
+    mark_as_explicit,
+    mark_as_dependency,
+    # System functions
+    get_system_info,
+    check_disk_space,
+    get_pacman_cache_stats,
+    check_failed_services,
+    get_boot_logs,
+    # Utils
     IS_ARCH,
     run_command,
 )
@@ -58,12 +81,14 @@ async def list_resources() -> list[Resource]:
         List of Resource objects describing available URI schemes
     """
     return [
+        # Wiki resources
         Resource(
             uri="archwiki://Installation_guide",
             name="Arch Wiki - Installation Guide",
             mimeType="text/markdown",
             description="Example: Fetch Arch Wiki pages as Markdown"
         ),
+        # AUR resources
         Resource(
             uri="aur://yay/pkgbuild",
             name="AUR - yay PKGBUILD",
@@ -76,17 +101,68 @@ async def list_resources() -> list[Resource]:
             mimeType="application/json",
             description="Example: Fetch AUR package metadata (votes, maintainer, etc)"
         ),
+        # Official repository resources
         Resource(
             uri="archrepo://vim",
             name="Official Repository - Package Info",
             mimeType="application/json",
             description="Example: Fetch official repository package details"
         ),
+        # Pacman resources
         Resource(
             uri="pacman://installed",
             name="System - Installed Packages",
             mimeType="application/json",
             description="List installed packages on Arch Linux system"
+        ),
+        Resource(
+            uri="pacman://orphans",
+            name="System - Orphan Packages",
+            mimeType="application/json",
+            description="List orphaned packages (dependencies no longer required)"
+        ),
+        Resource(
+            uri="pacman://explicit",
+            name="System - Explicitly Installed Packages",
+            mimeType="application/json",
+            description="List packages explicitly installed by user"
+        ),
+        Resource(
+            uri="pacman://groups",
+            name="System - Package Groups",
+            mimeType="application/json",
+            description="List all available package groups"
+        ),
+        Resource(
+            uri="pacman://group/base-devel",
+            name="System - Packages in base-devel Group",
+            mimeType="application/json",
+            description="Example: List packages in a specific group"
+        ),
+        # System resources
+        Resource(
+            uri="system://info",
+            name="System - System Information",
+            mimeType="application/json",
+            description="Get system information (kernel, arch, memory, uptime)"
+        ),
+        Resource(
+            uri="system://disk",
+            name="System - Disk Space",
+            mimeType="application/json",
+            description="Check disk space usage for critical paths"
+        ),
+        Resource(
+            uri="system://services/failed",
+            name="System - Failed Services",
+            mimeType="application/json",
+            description="List failed systemd services"
+        ),
+        Resource(
+            uri="system://logs/boot",
+            name="System - Boot Logs",
+            mimeType="text/plain",
+            description="Get recent boot logs from journalctl"
         ),
     ]
 
@@ -95,20 +171,28 @@ async def list_resources() -> list[Resource]:
 async def read_resource(uri: str) -> str:
     """
     Read a resource by URI.
-    
+
     Supported schemes:
     - archwiki://{page_title} - Returns Wiki page as Markdown
     - aur://{package}/pkgbuild - Returns raw PKGBUILD file
     - aur://{package}/info - Returns AUR package metadata
     - archrepo://{package} - Returns official repository package info
     - pacman://installed - Returns list of installed packages (Arch only)
-    
+    - pacman://orphans - Returns list of orphaned packages (Arch only)
+    - pacman://explicit - Returns list of explicitly installed packages (Arch only)
+    - pacman://groups - Returns list of all package groups (Arch only)
+    - pacman://group/{group_name} - Returns packages in a specific group (Arch only)
+    - system://info - Returns system information
+    - system://disk - Returns disk space information
+    - system://services/failed - Returns failed systemd services
+    - system://logs/boot - Returns recent boot logs
+
     Args:
         uri: Resource URI (can be string or AnyUrl object)
-    
+
     Returns:
         Resource content as string
-    
+
     Raises:
         ValueError: If URI scheme is unsupported or resource not found
     """
@@ -169,26 +253,82 @@ async def read_resource(uri: str) -> str:
         return json.dumps(package_info, indent=2)
     
     elif scheme == "pacman":
-        if parsed.netloc == "installed" or parsed.path == "/installed":
-            if not IS_ARCH:
-                raise ValueError("pacman://installed only available on Arch Linux systems")
-            
+        if not IS_ARCH:
+            raise ValueError(f"pacman:// resources only available on Arch Linux systems")
+
+        resource_path = parsed.netloc or parsed.path.lstrip('/')
+
+        if resource_path == "installed":
             # Get installed packages
-            result = run_command(["pacman", "-Q"])
-            if result.returncode != 0:
-                raise ValueError(f"Failed to get installed packages: {result.stderr}")
-            
+            exit_code, stdout, stderr = await run_command(["pacman", "-Q"])
+            if exit_code != 0:
+                raise ValueError(f"Failed to get installed packages: {stderr}")
+
             # Parse pacman output
             packages = []
-            for line in result.stdout.strip().split('\n'):
+            for line in stdout.strip().split('\n'):
                 if line.strip():
                     name, version = line.strip().rsplit(' ', 1)
                     packages.append({"name": name, "version": version})
-            
+
             return json.dumps(packages, indent=2)
+
+        elif resource_path == "orphans":
+            # Get orphan packages
+            result = await list_orphan_packages()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "explicit":
+            # Get explicitly installed packages
+            result = await list_explicit_packages()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "groups":
+            # Get all package groups
+            result = await list_package_groups()
+            return json.dumps(result, indent=2)
+
+        elif resource_path.startswith("group/"):
+            # Get packages in specific group
+            group_name = resource_path.split('/', 1)[1]
+            if not group_name:
+                raise ValueError("Group name required (e.g., pacman://group/base-devel)")
+            result = await list_group_packages(group_name)
+            return json.dumps(result, indent=2)
+
         else:
-            raise ValueError("Unsupported pacman resource (only pacman://installed supported)")
-    
+            raise ValueError(f"Unsupported pacman resource: {resource_path}")
+
+    elif scheme == "system":
+        resource_path = parsed.netloc or parsed.path.lstrip('/')
+
+        if resource_path == "info":
+            # Get system information
+            result = await get_system_info()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "disk":
+            # Get disk space information
+            result = await check_disk_space()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "services/failed":
+            # Get failed services
+            result = await check_failed_services()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "logs/boot":
+            # Get boot logs
+            result = await get_boot_logs()
+            # Return raw text for logs
+            if result.get("success"):
+                return result.get("logs", "")
+            else:
+                raise ValueError(result.get("error", "Failed to get boot logs"))
+
+        else:
+            raise ValueError(f"Unsupported system resource: {resource_path}")
+
     else:
         raise ValueError(f"Unsupported URI scheme: {scheme}")
 
@@ -322,6 +462,273 @@ async def list_tools() -> list[Tool]:
                 "required": ["package_info"]
             }
         ),
+
+        # Package Removal Tools
+        Tool(
+            name="remove_package",
+            description="Remove a package from the system. Supports various removal strategies: basic removal, removal with dependencies, or forced removal. Only works on Arch Linux. Requires sudo access.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "Name of the package to remove"
+                    },
+                    "remove_dependencies": {
+                        "type": "boolean",
+                        "description": "Remove package and its dependencies (pacman -Rs). Default: false",
+                        "default": False
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Force removal ignoring dependencies (pacman -Rdd). Use with caution! Default: false",
+                        "default": False
+                    }
+                },
+                "required": ["package_name"]
+            }
+        ),
+
+        Tool(
+            name="remove_packages_batch",
+            description="Remove multiple packages in a single transaction. More efficient than removing packages one by one. Only works on Arch Linux. Requires sudo access.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "package_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of package names to remove"
+                    },
+                    "remove_dependencies": {
+                        "type": "boolean",
+                        "description": "Remove packages and their dependencies. Default: false",
+                        "default": False
+                    }
+                },
+                "required": ["package_names"]
+            }
+        ),
+
+        # Orphan Package Management
+        Tool(
+            name="list_orphan_packages",
+            description="List all orphaned packages (dependencies no longer required by any installed package). Shows package names and total disk space usage. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="remove_orphans",
+            description="Remove all orphaned packages to free up disk space. Supports dry-run mode to preview changes and package exclusion. Only works on Arch Linux. Requires sudo access.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Preview what would be removed without actually removing. Default: true",
+                        "default": True
+                    },
+                    "exclude": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of package names to exclude from removal"
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        # Package Ownership Tools
+        Tool(
+            name="find_package_owner",
+            description="Find which package owns a specific file on the system. Useful for troubleshooting and understanding file origins. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Absolute path to the file (e.g., /usr/bin/vim)"
+                    }
+                },
+                "required": ["file_path"]
+            }
+        ),
+
+        Tool(
+            name="list_package_files",
+            description="List all files owned by a package. Supports optional filtering by pattern. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "Name of the package"
+                    },
+                    "filter_pattern": {
+                        "type": "string",
+                        "description": "Optional regex pattern to filter files (e.g., '*.conf' or '/etc/')"
+                    }
+                },
+                "required": ["package_name"]
+            }
+        ),
+
+        Tool(
+            name="search_package_files",
+            description="Search for files across all packages in repositories. Requires package database sync (pacman -Fy). Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filename_pattern": {
+                        "type": "string",
+                        "description": "File name or pattern to search for (e.g., 'vim' or '*.service')"
+                    }
+                },
+                "required": ["filename_pattern"]
+            }
+        ),
+
+        # Package Verification
+        Tool(
+            name="verify_package_integrity",
+            description="Verify the integrity of installed package files. Detects modified, missing, or corrupted files. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "Name of the package to verify"
+                    },
+                    "thorough": {
+                        "type": "boolean",
+                        "description": "Perform thorough check including file attributes. Default: false",
+                        "default": False
+                    }
+                },
+                "required": ["package_name"]
+            }
+        ),
+
+        # Package Groups
+        Tool(
+            name="list_package_groups",
+            description="List all available package groups (e.g., base, base-devel, gnome). Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="list_group_packages",
+            description="List all packages in a specific group. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "group_name": {
+                        "type": "string",
+                        "description": "Name of the package group (e.g., 'base-devel', 'gnome')"
+                    }
+                },
+                "required": ["group_name"]
+            }
+        ),
+
+        # Install Reason Management
+        Tool(
+            name="list_explicit_packages",
+            description="List all packages explicitly installed by the user (not installed as dependencies). Useful for creating backup lists or understanding system composition. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="mark_as_explicit",
+            description="Mark a package as explicitly installed. Prevents it from being removed as an orphan. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "Name of the package to mark as explicit"
+                    }
+                },
+                "required": ["package_name"]
+            }
+        ),
+
+        Tool(
+            name="mark_as_dependency",
+            description="Mark a package as a dependency. Allows it to be removed as an orphan if no packages depend on it. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "Name of the package to mark as dependency"
+                    }
+                },
+                "required": ["package_name"]
+            }
+        ),
+
+        # System Diagnostic Tools
+        Tool(
+            name="get_system_info",
+            description="Get comprehensive system information including kernel version, architecture, hostname, uptime, and memory statistics. Works on any system.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="check_disk_space",
+            description="Check disk space usage for critical filesystem paths including root, home, var, and pacman cache. Warns when space is low. Works on any system.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="get_pacman_cache_stats",
+            description="Analyze pacman package cache statistics including size, package count, and cache age. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="check_failed_services",
+            description="Check for failed systemd services. Useful for diagnosing system issues. Works on systemd-based systems.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="get_boot_logs",
+            description="Retrieve recent boot logs from journalctl. Useful for troubleshooting boot issues. Works on systemd-based systems.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lines": {
+                        "type": "integer",
+                        "description": "Number of log lines to retrieve. Default: 100",
+                        "default": 100
+                    }
+                },
+                "required": []
+            }
+        ),
     ]
 
 
@@ -384,7 +791,145 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         package_info = arguments["package_info"]
         result = analyze_package_metadata_risk(package_info)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
-    
+
+    # Package Removal Tools
+    elif name == "remove_package":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: remove_package only available on Arch Linux systems")]
+
+        package_name = arguments["package_name"]
+        remove_dependencies = arguments.get("remove_dependencies", False)
+        force = arguments.get("force", False)
+        result = await remove_package(package_name, remove_dependencies, force)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "remove_packages_batch":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: remove_packages_batch only available on Arch Linux systems")]
+
+        package_names = arguments["package_names"]
+        remove_dependencies = arguments.get("remove_dependencies", False)
+        result = await remove_packages_batch(package_names, remove_dependencies)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Orphan Package Management
+    elif name == "list_orphan_packages":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: list_orphan_packages only available on Arch Linux systems")]
+
+        result = await list_orphan_packages()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "remove_orphans":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: remove_orphans only available on Arch Linux systems")]
+
+        dry_run = arguments.get("dry_run", True)
+        exclude = arguments.get("exclude", None)
+        result = await remove_orphans(dry_run, exclude)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Package Ownership Tools
+    elif name == "find_package_owner":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: find_package_owner only available on Arch Linux systems")]
+
+        file_path = arguments["file_path"]
+        result = await find_package_owner(file_path)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "list_package_files":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: list_package_files only available on Arch Linux systems")]
+
+        package_name = arguments["package_name"]
+        filter_pattern = arguments.get("filter_pattern", None)
+        result = await list_package_files(package_name, filter_pattern)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "search_package_files":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: search_package_files only available on Arch Linux systems")]
+
+        filename_pattern = arguments["filename_pattern"]
+        result = await search_package_files(filename_pattern)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Package Verification
+    elif name == "verify_package_integrity":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: verify_package_integrity only available on Arch Linux systems")]
+
+        package_name = arguments["package_name"]
+        thorough = arguments.get("thorough", False)
+        result = await verify_package_integrity(package_name, thorough)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Package Groups
+    elif name == "list_package_groups":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: list_package_groups only available on Arch Linux systems")]
+
+        result = await list_package_groups()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "list_group_packages":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: list_group_packages only available on Arch Linux systems")]
+
+        group_name = arguments["group_name"]
+        result = await list_group_packages(group_name)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Install Reason Management
+    elif name == "list_explicit_packages":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: list_explicit_packages only available on Arch Linux systems")]
+
+        result = await list_explicit_packages()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "mark_as_explicit":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: mark_as_explicit only available on Arch Linux systems")]
+
+        package_name = arguments["package_name"]
+        result = await mark_as_explicit(package_name)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "mark_as_dependency":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: mark_as_dependency only available on Arch Linux systems")]
+
+        package_name = arguments["package_name"]
+        result = await mark_as_dependency(package_name)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # System Diagnostic Tools
+    elif name == "get_system_info":
+        result = await get_system_info()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "check_disk_space":
+        result = await check_disk_space()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "get_pacman_cache_stats":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: get_pacman_cache_stats only available on Arch Linux systems")]
+
+        result = await get_pacman_cache_stats()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "check_failed_services":
+        result = await check_failed_services()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "get_boot_logs":
+        lines = arguments.get("lines", 100)
+        result = await get_boot_logs(lines)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
     else:
         raise ValueError(f"Unknown tool: {name}")
 
