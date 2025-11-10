@@ -33,7 +33,8 @@ from .pacman import (
     list_group_packages,
     list_explicit_packages,
     mark_as_explicit,
-    mark_as_dependency
+    mark_as_dependency,
+    check_database_freshness
 )
 from .system import (
     get_system_info,
@@ -41,6 +42,29 @@ from .system import (
     get_pacman_cache_stats,
     check_failed_services,
     get_boot_logs
+)
+from .news import (
+    get_latest_news,
+    check_critical_news,
+    get_news_since_last_update
+)
+from .logs import (
+    get_transaction_history,
+    find_when_installed,
+    find_failed_transactions,
+    get_database_sync_history
+)
+from .mirrors import (
+    list_active_mirrors,
+    test_mirror_speed,
+    suggest_fastest_mirrors,
+    check_mirrorlist_health
+)
+from .config import (
+    analyze_pacman_conf,
+    analyze_makepkg_conf,
+    check_ignored_packages,
+    get_parallel_downloads_setting
 )
 from .utils import IS_ARCH, run_command
 
@@ -107,12 +131,32 @@ __all__ = [
     "list_explicit_packages",
     "mark_as_explicit",
     "mark_as_dependency",
+    "check_database_freshness",
     # System
     "get_system_info",
     "check_disk_space",
     "get_pacman_cache_stats",
     "check_failed_services",
     "get_boot_logs",
+    # News
+    "get_latest_news",
+    "check_critical_news",
+    "get_news_since_last_update",
+    # Logs
+    "get_transaction_history",
+    "find_when_installed",
+    "find_failed_transactions",
+    "get_database_sync_history",
+    # Mirrors
+    "list_active_mirrors",
+    "test_mirror_speed",
+    "suggest_fastest_mirrors",
+    "check_mirrorlist_health",
+    # Config
+    "analyze_pacman_conf",
+    "analyze_makepkg_conf",
+    "check_ignored_packages",
+    "get_parallel_downloads_setting",
     # Utils
     "IS_ARCH",
     "run_command",
