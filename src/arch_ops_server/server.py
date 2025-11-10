@@ -50,12 +50,32 @@ from . import (
     list_explicit_packages,
     mark_as_explicit,
     mark_as_dependency,
+    check_database_freshness,
     # System functions
     get_system_info,
     check_disk_space,
     get_pacman_cache_stats,
     check_failed_services,
     get_boot_logs,
+    # News functions
+    get_latest_news,
+    check_critical_news,
+    get_news_since_last_update,
+    # Logs functions
+    get_transaction_history,
+    find_when_installed,
+    find_failed_transactions,
+    get_database_sync_history,
+    # Mirrors functions
+    list_active_mirrors,
+    test_mirror_speed,
+    suggest_fastest_mirrors,
+    check_mirrorlist_health,
+    # Config functions
+    analyze_pacman_conf,
+    analyze_makepkg_conf,
+    check_ignored_packages,
+    get_parallel_downloads_setting,
     # Utils
     IS_ARCH,
     run_command,
@@ -163,6 +183,71 @@ async def list_resources() -> list[Resource]:
             name="System - Boot Logs",
             mimeType="text/plain",
             description="Get recent boot logs from journalctl"
+        ),
+        # News resources
+        Resource(
+            uri="archnews://latest",
+            name="Arch News - Latest",
+            mimeType="application/json",
+            description="Get latest Arch Linux news announcements"
+        ),
+        Resource(
+            uri="archnews://critical",
+            name="Arch News - Critical",
+            mimeType="application/json",
+            description="Get critical Arch Linux news requiring manual intervention"
+        ),
+        Resource(
+            uri="archnews://since-update",
+            name="Arch News - Since Last Update",
+            mimeType="application/json",
+            description="Get news posted since last pacman update"
+        ),
+        # Transaction log resources
+        Resource(
+            uri="pacman://log/recent",
+            name="Pacman Log - Recent Transactions",
+            mimeType="application/json",
+            description="Get recent package transactions from pacman log"
+        ),
+        Resource(
+            uri="pacman://log/failed",
+            name="Pacman Log - Failed Transactions",
+            mimeType="application/json",
+            description="Get failed package transactions"
+        ),
+        # Mirror resources
+        Resource(
+            uri="mirrors://active",
+            name="Mirrors - Active Configuration",
+            mimeType="application/json",
+            description="Get currently configured mirrors"
+        ),
+        Resource(
+            uri="mirrors://health",
+            name="Mirrors - Health Status",
+            mimeType="application/json",
+            description="Get mirror configuration health assessment"
+        ),
+        # Config resources
+        Resource(
+            uri="config://pacman",
+            name="Config - pacman.conf",
+            mimeType="application/json",
+            description="Get parsed pacman.conf configuration"
+        ),
+        Resource(
+            uri="config://makepkg",
+            name="Config - makepkg.conf",
+            mimeType="application/json",
+            description="Get parsed makepkg.conf configuration"
+        ),
+        # Database resources
+        Resource(
+            uri="pacman://database/freshness",
+            name="Pacman - Database Freshness",
+            mimeType="application/json",
+            description="Check when package databases were last synchronized"
         ),
     ]
 
@@ -296,6 +381,24 @@ async def read_resource(uri: str) -> str:
             result = await list_group_packages(group_name)
             return json.dumps(result, indent=2)
 
+        elif resource_path.startswith("log/"):
+            # Transaction log resources
+            log_type = resource_path.split('/', 1)[1] if '/' in resource_path else ""
+            
+            if log_type == "recent":
+                result = await get_transaction_history()
+                return json.dumps(result, indent=2)
+            elif log_type == "failed":
+                result = await find_failed_transactions()
+                return json.dumps(result, indent=2)
+            else:
+                raise ValueError(f"Unsupported log resource: {log_type}")
+
+        elif resource_path == "database/freshness":
+            # Database freshness check
+            result = await check_database_freshness()
+            return json.dumps(result, indent=2)
+
         else:
             raise ValueError(f"Unsupported pacman resource: {resource_path}")
 
@@ -328,6 +431,65 @@ async def read_resource(uri: str) -> str:
 
         else:
             raise ValueError(f"Unsupported system resource: {resource_path}")
+
+    elif scheme == "archnews":
+        resource_path = parsed.netloc or parsed.path.lstrip('/')
+
+        if resource_path == "latest":
+            # Get latest news
+            result = await get_latest_news()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "critical":
+            # Get critical news
+            result = await check_critical_news()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "since-update":
+            # Get news since last update
+            result = await get_news_since_last_update()
+            return json.dumps(result, indent=2)
+
+        else:
+            raise ValueError(f"Unsupported archnews resource: {resource_path}")
+
+    elif scheme == "mirrors":
+        if not IS_ARCH:
+            raise ValueError(f"mirrors:// resources only available on Arch Linux systems")
+
+        resource_path = parsed.netloc or parsed.path.lstrip('/')
+
+        if resource_path == "active":
+            # Get active mirrors
+            result = await list_active_mirrors()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "health":
+            # Get mirror health
+            result = await check_mirrorlist_health()
+            return json.dumps(result, indent=2)
+
+        else:
+            raise ValueError(f"Unsupported mirrors resource: {resource_path}")
+
+    elif scheme == "config":
+        if not IS_ARCH:
+            raise ValueError(f"config:// resources only available on Arch Linux systems")
+
+        resource_path = parsed.netloc or parsed.path.lstrip('/')
+
+        if resource_path == "pacman":
+            # Get pacman.conf
+            result = await analyze_pacman_conf()
+            return json.dumps(result, indent=2)
+
+        elif resource_path == "makepkg":
+            # Get makepkg.conf
+            result = await analyze_makepkg_conf()
+            return json.dumps(result, indent=2)
+
+        else:
+            raise ValueError(f"Unsupported config resource: {resource_path}")
 
     else:
         raise ValueError(f"Unsupported URI scheme: {scheme}")
@@ -729,6 +891,215 @@ async def list_tools() -> list[Tool]:
                 "required": []
             }
         ),
+
+        # News Tools
+        Tool(
+            name="get_latest_news",
+            description="Fetch recent Arch Linux news from RSS feed. Returns title, date, summary, and link for each news item.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of news items to return (default 10)",
+                        "default": 10
+                    },
+                    "since_date": {
+                        "type": "string",
+                        "description": "Optional date in ISO format (YYYY-MM-DD) to filter news"
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="check_critical_news",
+            description="Check for critical Arch Linux news requiring manual intervention. Scans recent news for keywords: 'manual intervention', 'action required', 'breaking change', etc.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of recent news items to check (default 20)",
+                        "default": 20
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="get_news_since_last_update",
+            description="Get news posted since last pacman update. Parses /var/log/pacman.log for last update timestamp. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        # Transaction Log Tools
+        Tool(
+            name="get_transaction_history",
+            description="Get recent package transactions from pacman log. Shows installed, upgraded, and removed packages. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of transactions to return (default 50)",
+                        "default": 50
+                    },
+                    "transaction_type": {
+                        "type": "string",
+                        "description": "Filter by type: install/remove/upgrade/all (default all)",
+                        "enum": ["all", "install", "remove", "upgrade"],
+                        "default": "all"
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="find_when_installed",
+            description="Find when a package was first installed and its upgrade history. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "package_name": {
+                        "type": "string",
+                        "description": "Name of the package to search for"
+                    }
+                },
+                "required": ["package_name"]
+            }
+        ),
+
+        Tool(
+            name="find_failed_transactions",
+            description="Find failed package transactions in pacman log. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="get_database_sync_history",
+            description="Get database synchronization history. Shows when 'pacman -Sy' was run. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of sync events to return (default 20)",
+                        "default": 20
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        # Mirror Management Tools
+        Tool(
+            name="list_active_mirrors",
+            description="List currently configured mirrors from mirrorlist. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="test_mirror_speed",
+            description="Test mirror response time. Can test a specific mirror or all active mirrors. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "mirror_url": {
+                        "type": "string",
+                        "description": "Specific mirror URL to test, or omit to test all active mirrors"
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="suggest_fastest_mirrors",
+            description="Suggest optimal mirrors based on official mirror status from archlinux.org. Filters by country if specified.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "country": {
+                        "type": "string",
+                        "description": "Optional country code to filter mirrors (e.g., 'US', 'DE')"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of mirrors to suggest (default 10)",
+                        "default": 10
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="check_mirrorlist_health",
+            description="Verify mirror configuration health. Checks for common issues like no active mirrors, outdated mirrorlist, high latency. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        # Configuration Tools
+        Tool(
+            name="analyze_pacman_conf",
+            description="Parse and analyze pacman.conf. Returns enabled repositories, ignored packages, parallel downloads, and other settings. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="analyze_makepkg_conf",
+            description="Parse and analyze makepkg.conf. Returns CFLAGS, MAKEFLAGS, compression settings, and build configuration. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="check_ignored_packages",
+            description="List packages ignored in updates from pacman.conf. Warns if critical system packages are ignored. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="get_parallel_downloads_setting",
+            description="Get parallel downloads configuration from pacman.conf and provide recommendations. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+
+        Tool(
+            name="check_database_freshness",
+            description="Check when package databases were last synchronized. Warns if databases are stale (> 24 hours). Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
     ]
 
 
@@ -930,6 +1301,126 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await get_boot_logs(lines)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
+    # News tools
+    elif name == "get_latest_news":
+        limit = arguments.get("limit", 10)
+        since_date = arguments.get("since_date")
+        result = await get_latest_news(limit=limit, since_date=since_date)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "check_critical_news":
+        limit = arguments.get("limit", 20)
+        result = await check_critical_news(limit=limit)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "get_news_since_last_update":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: get_news_since_last_update only available on Arch Linux systems")]
+        
+        result = await get_news_since_last_update()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Transaction log tools
+    elif name == "get_transaction_history":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: get_transaction_history only available on Arch Linux systems")]
+        
+        limit = arguments.get("limit", 50)
+        transaction_type = arguments.get("transaction_type", "all")
+        result = await get_transaction_history(limit=limit, transaction_type=transaction_type)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "find_when_installed":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: find_when_installed only available on Arch Linux systems")]
+        
+        package_name = arguments.get("package_name")
+        if not package_name:
+            return [TextContent(type="text", text="Error: package_name required")]
+        
+        result = await find_when_installed(package_name)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "find_failed_transactions":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: find_failed_transactions only available on Arch Linux systems")]
+        
+        result = await find_failed_transactions()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "get_database_sync_history":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: get_database_sync_history only available on Arch Linux systems")]
+        
+        limit = arguments.get("limit", 20)
+        result = await get_database_sync_history(limit=limit)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Mirror management tools
+    elif name == "list_active_mirrors":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: list_active_mirrors only available on Arch Linux systems")]
+        
+        result = await list_active_mirrors()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "test_mirror_speed":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: test_mirror_speed only available on Arch Linux systems")]
+        
+        mirror_url = arguments.get("mirror_url")
+        result = await test_mirror_speed(mirror_url=mirror_url)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "suggest_fastest_mirrors":
+        country = arguments.get("country")
+        limit = arguments.get("limit", 10)
+        result = await suggest_fastest_mirrors(country=country, limit=limit)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "check_mirrorlist_health":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: check_mirrorlist_health only available on Arch Linux systems")]
+        
+        result = await check_mirrorlist_health()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Configuration tools
+    elif name == "analyze_pacman_conf":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: analyze_pacman_conf only available on Arch Linux systems")]
+        
+        result = await analyze_pacman_conf()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "analyze_makepkg_conf":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: analyze_makepkg_conf only available on Arch Linux systems")]
+        
+        result = await analyze_makepkg_conf()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "check_ignored_packages":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: check_ignored_packages only available on Arch Linux systems")]
+        
+        result = await check_ignored_packages()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "get_parallel_downloads_setting":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: get_parallel_downloads_setting only available on Arch Linux systems")]
+        
+        result = await get_parallel_downloads_setting()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "check_database_freshness":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: check_database_freshness only available on Arch Linux systems")]
+        
+        result = await check_database_freshness()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -984,6 +1475,11 @@ async def list_prompts() -> list[Prompt]:
                     "required": True
                 }
             ]
+        ),
+        Prompt(
+            name="safe_system_update",
+            description="Enhanced system update workflow that checks for critical news, disk space, and failed services before updating",
+            arguments=[]
         ),
     ]
 
@@ -1202,6 +1698,161 @@ paru -S {package_name}  # or yay -S {package_name}
                     content=PromptMessage.TextContent(
                         type="text",
                         text=f"Please analyze the dependencies for the package '{package_name}' and suggest the best installation approach."
+                    )
+                ),
+                PromptMessage(
+                    role="assistant",
+                    content=PromptMessage.TextContent(
+                        type="text",
+                        text=analysis
+                    )
+                )
+            ]
+        )
+    
+    elif name == "safe_system_update":
+        if not IS_ARCH:
+            return GetPromptResult(
+                description="Safe system update workflow",
+                messages=[
+                    PromptMessage(
+                        role="assistant",
+                        content=PromptMessage.TextContent(
+                            type="text",
+                            text="Error: safe_system_update prompt only available on Arch Linux systems"
+                        )
+                    )
+                ]
+            )
+        
+        analysis = "# Safe System Update Workflow\n\n"
+        warnings = []
+        recommendations = []
+        
+        # Step 1: Check for critical news
+        try:
+            critical_news = await check_critical_news(limit=10)
+            
+            if critical_news.get("has_critical"):
+                analysis += "## ⚠️ Critical Arch Linux News\n\n"
+                for news_item in critical_news.get("critical_news", [])[:3]:
+                    analysis += f"**{news_item['title']}**\n"
+                    analysis += f"Published: {news_item['published']}\n"
+                    analysis += f"{news_item['summary'][:200]}...\n"
+                    analysis += f"[Read more]({news_item['link']})\n\n"
+                
+                warnings.append("Critical news requiring manual intervention found!")
+                recommendations.append("Read all critical news articles before updating")
+            else:
+                analysis += "## ✓ No Critical News\n\nNo manual intervention required for recent updates.\n\n"
+        except Exception as e:
+            analysis += f"## ⚠️ News Check Failed\n\n{str(e)}\n\n"
+        
+        # Step 2: Check disk space
+        try:
+            disk_space = await check_disk_space()
+            disk_usage = disk_space.get("disk_usage", {})
+            
+            analysis += "## Disk Space Status\n\n"
+            for path, info in disk_usage.items():
+                if "warning" in info:
+                    analysis += f"- ⚠️ {path}: {info['available']} available ({info['use_percent']} used) - {info['warning']}\n"
+                    warnings.append(f"Low disk space on {path}")
+                else:
+                    analysis += f"- ✓ {path}: {info['available']} available ({info['use_percent']} used)\n"
+            analysis += "\n"
+        except Exception as e:
+            analysis += f"## ⚠️ Disk Space Check Failed\n\n{str(e)}\n\n"
+        
+        # Step 3: Check pending updates
+        try:
+            updates = await check_updates_dry_run()
+            
+            if updates.get("updates_available"):
+                count = updates.get("count", 0)
+                analysis += f"## Pending Updates ({count} packages)\n\n"
+                
+                # Show first 10 updates
+                for update in updates.get("packages", [])[:10]:
+                    analysis += f"- {update['package']}: {update['current_version']} → {update['new_version']}\n"
+                
+                if count > 10:
+                    analysis += f"\n...and {count - 10} more packages\n"
+                analysis += "\n"
+            else:
+                analysis += "## ✓ System Up to Date\n\nNo updates available.\n\n"
+                return GetPromptResult(
+                    description="System is already up to date",
+                    messages=[
+                        PromptMessage(
+                            role="assistant",
+                            content=PromptMessage.TextContent(
+                                type="text",
+                                text=analysis
+                            )
+                        )
+                    ]
+                )
+        except Exception as e:
+            analysis += f"## ⚠️ Update Check Failed\n\n{str(e)}\n\n"
+        
+        # Step 4: Check failed services
+        try:
+            failed_services = await check_failed_services()
+            
+            if not failed_services.get("all_ok"):
+                analysis += "## ⚠️ Failed Services Detected\n\n"
+                for service in failed_services.get("failed_services", [])[:5]:
+                    analysis += f"- {service['unit']}\n"
+                warnings.append("System has failed services")
+                recommendations.append("Investigate failed services before updating")
+                analysis += "\n"
+            else:
+                analysis += "## ✓ All Services Running\n\nNo failed systemd services.\n\n"
+        except Exception as e:
+            analysis += f"## ⚠️ Service Check Failed\n\n{str(e)}\n\n"
+        
+        # Step 5: Check database freshness
+        try:
+            db_freshness = await check_database_freshness()
+            
+            if db_freshness.get("needs_sync"):
+                analysis += "## Database Synchronization\n\n"
+                analysis += f"Databases are {db_freshness.get('oldest_age_hours', 0):.1f} hours old.\n"
+                recommendations.append("Database will be synchronized during update")
+                analysis += "\n"
+        except Exception as e:
+            logger.warning(f"Database freshness check failed: {e}")
+        
+        # Step 6: Summary and recommendations
+        analysis += "## Recommendations\n\n"
+        
+        if warnings:
+            analysis += "### Warnings:\n"
+            for warning in warnings:
+                analysis += f"- ⚠️ {warning}\n"
+            analysis += "\n"
+        
+        if recommendations:
+            analysis += "### Before Updating:\n"
+            for rec in recommendations:
+                analysis += f"- {rec}\n"
+            analysis += "\n"
+        
+        if not warnings:
+            analysis += "✓ System is ready for update\n\n"
+            analysis += "Run: `sudo pacman -Syu`\n"
+        else:
+            analysis += "⚠️ **Address warnings before updating**\n"
+        
+        return GetPromptResult(
+            description="Safe system update analysis",
+            messages=[
+                PromptMessage(
+                    role="user",
+                    content=PromptMessage.TextContent(
+                        type="text",
+                        text="Check if my system is ready for a safe update"
                     )
                 ),
                 PromptMessage(
