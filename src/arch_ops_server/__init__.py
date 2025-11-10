@@ -27,7 +27,13 @@ from .pacman import (
     remove_orphans,
     find_package_owner,
     list_package_files,
-    search_package_files
+    search_package_files,
+    verify_package_integrity,
+    list_package_groups,
+    list_group_packages,
+    list_explicit_packages,
+    mark_as_explicit,
+    mark_as_dependency
 )
 from .utils import IS_ARCH, run_command
 
@@ -88,6 +94,12 @@ __all__ = [
     "find_package_owner",
     "list_package_files",
     "search_package_files",
+    "verify_package_integrity",
+    "list_package_groups",
+    "list_group_packages",
+    "list_explicit_packages",
+    "mark_as_explicit",
+    "mark_as_dependency",
     # Utils
     "IS_ARCH",
     "run_command",

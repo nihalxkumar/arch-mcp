@@ -860,3 +860,355 @@ async def search_package_files(filename_pattern: str) -> Dict[str, Any]:
             f"Failed to search package files: {str(e)}"
         )
 
+
+async def verify_package_integrity(package_name: str, thorough: bool = False) -> Dict[str, Any]:
+    """
+    Verify integrity of an installed package.
+
+    Args:
+        package_name: Name of package to verify
+        thorough: If True, perform thorough check (pacman -Qkk)
+
+    Returns:
+        Dict with verification results
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Package verification is only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    logger.info(f"Verifying package integrity: {package_name} (thorough={thorough})")
+
+    try:
+        cmd = ["pacman", "-Qkk" if thorough else "-Qk", package_name]
+
+        exit_code, stdout, stderr = await run_command(
+            cmd,
+            timeout=30,
+            check=False
+        )
+
+        if exit_code != 0 and "was not found" in stderr:
+            return create_error_response(
+                "NotFound",
+                f"Package not installed: {package_name}"
+            )
+
+        # Parse verification output
+        issues = []
+        for line in stdout.strip().split('\n'):
+            if "warning" in line.lower() or "missing" in line.lower():
+                issues.append(line.strip())
+
+        logger.info(f"Found {len(issues)} issues for {package_name}")
+
+        return {
+            "package": package_name,
+            "thorough": thorough,
+            "issues_found": len(issues),
+            "issues": issues,
+            "all_ok": len(issues) == 0
+        }
+
+    except Exception as e:
+        logger.error(f"Package verification failed: {e}")
+        return create_error_response(
+            "CommandError",
+            f"Failed to verify package: {str(e)}"
+        )
+
+
+async def list_package_groups() -> Dict[str, Any]:
+    """
+    List all available package groups.
+
+    Returns:
+        Dict with list of groups
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Package groups are only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    logger.info("Listing package groups")
+
+    try:
+        exit_code, stdout, stderr = await run_command(
+            ["pacman", "-Sg"],
+            timeout=10,
+            check=False
+        )
+
+        if exit_code != 0:
+            return create_error_response(
+                "CommandError",
+                f"Failed to list groups: {stderr}"
+            )
+
+        # Parse output - format: "group package"
+        groups = set()
+        for line in stdout.strip().split('\n'):
+            if line.strip():
+                parts = line.split()
+                if parts:
+                    groups.add(parts[0])
+
+        groups_list = sorted(list(groups))
+
+        logger.info(f"Found {len(groups_list)} package groups")
+
+        return {
+            "group_count": len(groups_list),
+            "groups": groups_list
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list groups: {e}")
+        return create_error_response(
+            "CommandError",
+            f"Failed to list package groups: {str(e)}"
+        )
+
+
+async def list_group_packages(group_name: str) -> Dict[str, Any]:
+    """
+    List packages in a specific group.
+
+    Args:
+        group_name: Name of the group
+
+    Returns:
+        Dict with packages in the group
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Package groups are only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    logger.info(f"Listing packages in group: {group_name}")
+
+    try:
+        exit_code, stdout, stderr = await run_command(
+            ["pacman", "-Sg", group_name],
+            timeout=10,
+            check=False
+        )
+
+        if exit_code != 0:
+            return create_error_response(
+                "NotFound",
+                f"Group not found: {group_name}"
+            )
+
+        # Parse output - format: "group package"
+        packages = []
+        for line in stdout.strip().split('\n'):
+            if line.strip():
+                parts = line.split()
+                if len(parts) >= 2:
+                    packages.append(parts[1])
+
+        logger.info(f"Found {len(packages)} packages in {group_name}")
+
+        return {
+            "group": group_name,
+            "package_count": len(packages),
+            "packages": packages
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list group packages: {e}")
+        return create_error_response(
+            "CommandError",
+            f"Failed to list packages in group: {str(e)}"
+        )
+
+
+async def list_explicit_packages() -> Dict[str, Any]:
+    """
+    List explicitly installed packages.
+
+    Returns:
+        Dict with list of explicit packages
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Package install reason queries are only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    logger.info("Listing explicitly installed packages")
+
+    try:
+        exit_code, stdout, stderr = await run_command(
+            ["pacman", "-Qe"],
+            timeout=15,
+            check=False
+        )
+
+        if exit_code != 0:
+            return create_error_response(
+                "CommandError",
+                f"Failed to list explicit packages: {stderr}"
+            )
+
+        # Parse output - format: "package version"
+        packages = []
+        for line in stdout.strip().split('\n'):
+            if line.strip():
+                parts = line.split()
+                if len(parts) >= 2:
+                    packages.append({
+                        "name": parts[0],
+                        "version": parts[1]
+                    })
+
+        logger.info(f"Found {len(packages)} explicitly installed packages")
+
+        return {
+            "package_count": len(packages),
+            "packages": packages
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list explicit packages: {e}")
+        return create_error_response(
+            "CommandError",
+            f"Failed to list explicit packages: {str(e)}"
+        )
+
+
+async def mark_as_explicit(package_name: str) -> Dict[str, Any]:
+    """
+    Mark a package as explicitly installed.
+
+    Args:
+        package_name: Name of package to mark
+
+    Returns:
+        Dict with operation status
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Package marking is only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    logger.info(f"Marking {package_name} as explicitly installed")
+
+    try:
+        exit_code, stdout, stderr = await run_command(
+            ["sudo", "pacman", "-D", "--asexplicit", package_name],
+            timeout=10,
+            check=False,
+            skip_sudo_check=True
+        )
+
+        if exit_code != 0:
+            return create_error_response(
+                "CommandError",
+                f"Failed to mark package as explicit: {stderr}"
+            )
+
+        logger.info(f"Successfully marked {package_name} as explicit")
+
+        return {
+            "success": True,
+            "package": package_name,
+            "marked_as": "explicit"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to mark package: {e}")
+        return create_error_response(
+            "CommandError",
+            f"Failed to mark package as explicit: {str(e)}"
+        )
+
+
+async def mark_as_dependency(package_name: str) -> Dict[str, Any]:
+    """
+    Mark a package as a dependency.
+
+    Args:
+        package_name: Name of package to mark
+
+    Returns:
+        Dict with operation status
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Package marking is only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    logger.info(f"Marking {package_name} as dependency")
+
+    try:
+        exit_code, stdout, stderr = await run_command(
+            ["sudo", "pacman", "-D", "--asdeps", package_name],
+            timeout=10,
+            check=False,
+            skip_sudo_check=True
+        )
+
+        if exit_code != 0:
+            return create_error_response(
+                "CommandError",
+                f"Failed to mark package as dependency: {stderr}"
+            )
+
+        logger.info(f"Successfully marked {package_name} as dependency")
+
+        return {
+            "success": True,
+            "package": package_name,
+            "marked_as": "dependency"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to mark package: {e}")
+        return create_error_response(
+            "CommandError",
+            f"Failed to mark package as dependency: {str(e)}"
+        )
+
