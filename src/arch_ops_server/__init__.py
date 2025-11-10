@@ -18,7 +18,30 @@ from .aur import (
     analyze_package_metadata_risk,
     install_package_secure
 )
-from .pacman import get_official_package_info, check_updates_dry_run
+from .pacman import (
+    get_official_package_info,
+    check_updates_dry_run,
+    remove_package,
+    remove_packages_batch,
+    list_orphan_packages,
+    remove_orphans,
+    find_package_owner,
+    list_package_files,
+    search_package_files,
+    verify_package_integrity,
+    list_package_groups,
+    list_group_packages,
+    list_explicit_packages,
+    mark_as_explicit,
+    mark_as_dependency
+)
+from .system import (
+    get_system_info,
+    check_disk_space,
+    get_pacman_cache_stats,
+    check_failed_services,
+    get_boot_logs
+)
 from .utils import IS_ARCH, run_command
 
 # Import server from the server module
@@ -71,6 +94,25 @@ __all__ = [
     # Pacman
     "get_official_package_info",
     "check_updates_dry_run",
+    "remove_package",
+    "remove_packages_batch",
+    "list_orphan_packages",
+    "remove_orphans",
+    "find_package_owner",
+    "list_package_files",
+    "search_package_files",
+    "verify_package_integrity",
+    "list_package_groups",
+    "list_group_packages",
+    "list_explicit_packages",
+    "mark_as_explicit",
+    "mark_as_dependency",
+    # System
+    "get_system_info",
+    "check_disk_space",
+    "get_pacman_cache_stats",
+    "check_failed_services",
+    "get_boot_logs",
     # Utils
     "IS_ARCH",
     "run_command",
