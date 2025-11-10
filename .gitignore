@@ -57,3 +57,6 @@ htmlcov/
 # Temporary files
 *.tmp
 .cache/
+
+# Git worktrees
+.worktrees/
