@@ -1212,3 +1212,94 @@ async def mark_as_dependency(package_name: str) -> Dict[str, Any]:
             f"Failed to mark package as dependency: {str(e)}"
         )
 
+
+async def check_database_freshness() -> Dict[str, Any]:
+    """
+    Check when package databases were last synchronized.
+
+    Returns:
+        Dict with database sync timestamps per repository
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Database freshness check is only available on Arch Linux"
+        )
+
+    logger.info("Checking database freshness")
+
+    try:
+        from pathlib import Path
+        from datetime import datetime, timedelta
+
+        sync_dir = Path("/var/lib/pacman/sync")
+
+        if not sync_dir.exists():
+            return create_error_response(
+                "NotFound",
+                "Pacman sync directory not found"
+            )
+
+        # Get all .db files
+        db_files = list(sync_dir.glob("*.db"))
+
+        if not db_files:
+            return create_error_response(
+                "NotFound",
+                "No database files found"
+            )
+
+        databases = []
+        now = datetime.now()
+        oldest_db = None
+        oldest_age = timedelta(0)
+
+        for db_file in db_files:
+            mtime = datetime.fromtimestamp(db_file.stat().st_mtime)
+            age = now - mtime
+            hours_old = age.total_seconds() / 3600
+
+            db_info = {
+                "repository": db_file.stem,  # Remove .db extension
+                "last_sync": mtime.isoformat(),
+                "hours_old": round(hours_old, 1)
+            }
+
+            # Warn if older than 24 hours
+            if hours_old > 24:
+                db_info["warning"] = f"Database is {hours_old:.0f} hours old (> 24h)"
+
+            databases.append(db_info)
+
+            # Track oldest
+            if oldest_db is None or age > oldest_age:
+                oldest_db = db_info["repository"]
+                oldest_age = age
+
+        # Sort by hours_old descending (oldest first)
+        databases.sort(key=lambda x: x["hours_old"], reverse=True)
+
+        logger.info(f"Checked {len(databases)} databases, oldest: {oldest_age.total_seconds() / 3600:.1f}h")
+
+        recommendations = []
+        if oldest_age.total_seconds() / 3600 > 24:
+            recommendations.append("Databases are stale (> 24h). Run 'sudo pacman -Sy' to synchronize.")
+        if oldest_age.total_seconds() / 3600 > 168:  # 1 week
+            recommendations.append("Databases are very stale (> 1 week). Consider full system update.")
+
+        return {
+            "database_count": len(databases),
+            "databases": databases,
+            "oldest_database": oldest_db,
+            "oldest_age_hours": round(oldest_age.total_seconds() / 3600, 1),
+            "recommendations": recommendations,
+            "needs_sync": oldest_age.total_seconds() / 3600 > 24
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to check database freshness: {e}")
+        return create_error_response(
+            "CheckError",
+            f"Failed to check database freshness: {str(e)}"
+        )
+
