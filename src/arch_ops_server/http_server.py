@@ -28,7 +28,7 @@ try:
 except ImportError:
     SSE_AVAILABLE = False
 
-from .server import server
+from .server import server, list_tools, list_resources, list_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
     Handle MCP request directly without SSE session.
     
     This is used when Smithery POSTs directly without establishing SSE connection.
-    Creates a temporary in-memory connection to process the request.
+    Processes requests using the server's registered handlers.
     
     Args:
         request_data: JSON-RPC request data
@@ -47,57 +47,31 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
         JSON-RPC response data
     """
     import json
-    from mcp.server import Server
-    from mcp.server.sse import SseServerTransport
-    
-    # Create in-memory streams to simulate SSE connection
-    class InMemoryStream:
-        def __init__(self):
-            self.buffer = []
-            self.closed = False
-        
-        async def read(self):
-            if self.buffer:
-                return self.buffer.pop(0)
-            return None
-        
-        async def write(self, data):
-            self.buffer.append(data)
-        
-        async def close(self):
-            self.closed = True
     
     try:
-        # Create temporary streams
-        read_stream = InMemoryStream()
-        write_stream = InMemoryStream()
-        
-        # Write the request to the read stream
-        await read_stream.write(json.dumps(request_data).encode("utf-8"))
-        
-        # Process the request through the server
-        # We need to run the server's request handler
-        # The server expects to handle requests through its internal handlers
-        # Let's use the server's handle_request method if available
-        
-        # Actually, we need to properly integrate with the server
-        # For now, let's create a minimal handler that processes initialize requests
         method = request_data.get("method", "")
         params = request_data.get("params", {})
         request_id = request_data.get("id")
         
         if method == "initialize":
-            # Handle initialize request
-            # Return a basic initialize response matching MCP protocol
+            # Handle initialize request - return proper capabilities
+            # Indicate that we support tools, resources, and prompts
             result = {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": {
                     "protocolVersion": params.get("protocolVersion", "2025-06-18"),
                     "capabilities": {
-                        "tools": {},
-                        "resources": {},
-                        "prompts": {},
+                        "tools": {
+                            "listChanged": False
+                        },
+                        "resources": {
+                            "subscribe": False,
+                            "listChanged": False
+                        },
+                        "prompts": {
+                            "listChanged": False
+                        }
                     },
                     "serverInfo": {
                         "name": "arch-ops-server",
@@ -106,9 +80,63 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                 }
             }
             return result
+        elif method == "tools/list":
+            # Call the server's list_tools handler directly
+            tools = await list_tools()
+            # Convert Tool objects to dicts
+            tools_list = []
+            for tool in tools:
+                tools_list.append({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.inputSchema
+                })
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "tools": tools_list
+                }
+            }
+        elif method == "resources/list":
+            # Call the server's list_resources handler directly
+            resources = await list_resources()
+            # Convert Resource objects to dicts
+            resources_list = []
+            for resource in resources:
+                resources_list.append({
+                    "uri": resource.uri,
+                    "name": resource.name,
+                    "mimeType": resource.mimeType,
+                    "description": resource.description
+                })
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "resources": resources_list
+                }
+            }
+        elif method == "prompts/list":
+            # Call the server's list_prompts handler directly
+            prompts = await list_prompts()
+            # Convert Prompt objects to dicts
+            prompts_list = []
+            for prompt in prompts:
+                prompts_list.append({
+                    "name": prompt.name,
+                    "description": prompt.description,
+                    "arguments": prompt.arguments
+                })
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "prompts": prompts_list
+                }
+            }
         else:
-            # For other methods, we'd need to properly route through the server
-            # This is a simplified implementation
+            # For other methods, return method not found
             return {
                 "jsonrpc": "2.0",
                 "error": {
@@ -119,6 +147,8 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
             }
     except Exception as e:
         logger.error(f"Error handling direct MCP request: {e}", exc_info=True)
+        import traceback
+        logger.error(traceback.format_exc())
         return {
             "jsonrpc": "2.0",
             "error": {
