@@ -156,32 +156,71 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                 }
         elif method == "prompts/list":
             # Call the server's list_prompts handler directly
-            logger.info("Handling prompts/list request")
+            logger.info("Handling prompts/list request - starting")
             try:
+                # Verify list_prompts is callable
+                if not callable(list_prompts):
+                    logger.error("list_prompts is not callable!")
+                    return {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32603,
+                            "message": "list_prompts function is not callable"
+                        },
+                        "id": request_id
+                    }
+                
+                # Log before calling the function
+                logger.info("About to call list_prompts()")
                 # Ensure we await the async function properly
                 prompts = await list_prompts()
-                logger.info(f"Got {len(prompts)} prompts")
+                logger.info(f"Got {len(prompts)} prompts from list_prompts()")
                 # Convert Prompt objects to dicts
                 prompts_list = []
-                for prompt in prompts:
+                for idx, prompt in enumerate(prompts):
                     try:
-                        prompts_list.append({
-                            "name": str(prompt.name),
-                            "description": str(prompt.description) if prompt.description else "",
-                            "arguments": prompt.arguments if prompt.arguments else []
-                        })
+                        logger.debug(f"Processing prompt {idx+1}/{len(prompts)}: {getattr(prompt, 'name', 'unknown')}")
+                        # Safely extract prompt fields
+                        prompt_dict = {
+                            "name": str(prompt.name) if hasattr(prompt, 'name') and prompt.name else "",
+                        }
+                        
+                        # Handle description (may be None)
+                        if hasattr(prompt, 'description'):
+                            prompt_dict["description"] = str(prompt.description) if prompt.description else ""
+                        else:
+                            prompt_dict["description"] = ""
+                        
+                        # Handle arguments (may be None or empty list)
+                        if hasattr(prompt, 'arguments') and prompt.arguments:
+                            # Ensure arguments is a list
+                            if isinstance(prompt.arguments, list):
+                                prompt_dict["arguments"] = prompt.arguments
+                            else:
+                                # Try to convert to list if it's not
+                                prompt_dict["arguments"] = list(prompt.arguments) if prompt.arguments else []
+                        else:
+                            prompt_dict["arguments"] = []
+                        
+                        prompts_list.append(prompt_dict)
+                        logger.debug(f"Added prompt: {prompt_dict['name']}")
                     except Exception as e:
-                        logger.error(f"Error converting prompt to dict: {e}", exc_info=True)
+                        logger.error(f"Error converting prompt {idx+1} to dict: {e}", exc_info=True)
+                        import traceback
+                        logger.error(traceback.format_exc())
                         # Skip this prompt but continue with others
                         continue
+                
                 logger.info(f"Returning {len(prompts_list)} prompts")
-                return {
+                result = {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "result": {
                         "prompts": prompts_list
                     }
                 }
+                logger.info("Successfully prepared prompts/list response")
+                return result
             except Exception as e:
                 logger.error(f"Error in prompts/list: {e}", exc_info=True)
                 import traceback
