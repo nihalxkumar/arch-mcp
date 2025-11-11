@@ -132,6 +132,65 @@ async def handle_messages(request: Request) -> None:
     await handle_messages_raw(request.scope, request.receive, request._send)
 
 
+async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
+    """
+    Raw ASGI handler for /mcp endpoint (Smithery requirement).
+    
+    Smithery expects a single /mcp endpoint that handles:
+    - GET: Establish SSE connection (streamable HTTP)
+    - POST: Send messages
+    - DELETE: Close connection
+    
+    Args:
+        scope: ASGI scope dictionary
+        receive: ASGI receive callable
+        send: ASGI send callable
+    """
+    method = scope.get("method", "")
+    
+    if method == "GET":
+        # GET /mcp establishes SSE connection
+        logger.info("GET /mcp - Establishing SSE connection")
+        await handle_sse_raw(scope, receive, send)
+    elif method == "POST":
+        # POST /mcp sends messages
+        logger.info("POST /mcp - Handling message")
+        await handle_messages_raw(scope, receive, send)
+    elif method == "DELETE":
+        # DELETE /mcp closes connection
+        logger.info("DELETE /mcp - Closing connection")
+        # SSE connections are closed when the stream ends, so just return 200
+        await send({
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [[b"content-type", b"text/plain"]],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": b"Connection closed",
+        })
+    else:
+        await send({
+            "type": "http.response.start",
+            "status": 405,
+            "headers": [[b"content-type", b"text/plain"]],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": f"Method {method} not allowed".encode(),
+        })
+
+
+async def handle_mcp(request: Request) -> None:
+    """
+    Starlette request handler wrapper for /mcp endpoint.
+    
+    Args:
+        request: Starlette Request object
+    """
+    await handle_mcp_raw(request.scope, request.receive, request._send)
+
+
 def create_app() -> Any:
     """
     Create Starlette application with MCP SSE endpoints.
@@ -153,8 +212,11 @@ def create_app() -> Any:
             "MCP SSE transport not available. Install mcp package with SSE support."
         )
 
-    # Create routes - SSE transport uses /sse and /messages endpoints
+    # Create routes
+    # - /mcp: Required by Smithery (handles GET/POST/DELETE for streamable HTTP)
+    # - /sse and /messages: Alternative endpoints for other clients
     routes = [
+        Route("/mcp", endpoint=handle_mcp, methods=["GET", "POST", "DELETE"]),
         Route("/sse", endpoint=handle_sse),
         Route("/messages", endpoint=handle_messages, methods=["POST"]),
     ]
@@ -173,7 +235,7 @@ def create_app() -> Any:
     )
 
     logger.info("MCP HTTP Server initialized with SSE transport")
-    logger.info("Endpoints: GET /sse, POST /messages")
+    logger.info("Endpoints: GET/POST/DELETE /mcp (Smithery), GET /sse, POST /messages")
 
     return app
 
@@ -196,7 +258,7 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8080) -> None:
 
     logger.info(f"Starting Arch Linux MCP HTTP Server on {host}:{port}")
     logger.info("Transport: Server-Sent Events (SSE)")
-    logger.info("Endpoints: GET /sse, POST /messages")
+    logger.info("Endpoints: GET/POST/DELETE /mcp (Smithery), GET /sse, POST /messages")
 
     # Create app
     app = create_app()
