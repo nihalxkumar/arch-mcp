@@ -32,6 +32,31 @@ from .server import server
 
 logger = logging.getLogger(__name__)
 
+
+async def _handle_direct_mcp_request(request_data: dict) -> dict:
+    """
+    Handle MCP request directly without SSE session.
+    
+    This is used when Smithery POSTs directly without establishing SSE connection.
+    
+    Args:
+        request_data: JSON-RPC request data
+        
+    Returns:
+        JSON-RPC response data
+    """
+    # This is a simplified handler - in practice, we'd need to properly
+    # integrate with the MCP server's request handling
+    # For now, return an error suggesting SSE connection
+    return {
+        "jsonrpc": "2.0",
+        "error": {
+            "code": -32600,
+            "message": "This server requires SSE connection. Please use GET /mcp first to establish connection."
+        },
+        "id": request_data.get("id")
+    }
+
 # Initialize SSE transport at module level
 sse: Any = None
 if SSE_AVAILABLE:
@@ -156,8 +181,78 @@ async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
         await handle_sse_raw(scope, receive, send)
     elif method == "POST":
         # POST /mcp sends messages
+        # Check if session_id exists in query string
+        query_string = scope.get("query_string", b"").decode("utf-8")
+        has_session_id = "session_id" in query_string
+        
+        if not has_session_id:
+            # Smithery POSTs directly without establishing SSE connection first
+            # Handle as regular HTTP request-response (non-SSE)
+            logger.info("POST /mcp without session_id - handling as regular HTTP request")
+            try:
+                # Read request body
+                body = b""
+                more_body = True
+                while more_body:
+                    message = await receive()
+                    if message["type"] == "http.request":
+                        body += message.get("body", b"")
+                        more_body = message.get("more_body", False)
+                
+                # Parse JSON-RPC request
+                import json
+                request_data = json.loads(body.decode("utf-8"))
+                
+                # Process the request through the MCP server
+                # Create a temporary session-like handler
+                from io import BytesIO
+                import sys
+                
+                # Use SSE transport but create a session on-the-fly
+                # Actually, we need to handle this differently - create a one-off connection
+                logger.info(f"Processing MCP request: {request_data.get('method', 'unknown')}")
+                
+                # For now, try to establish SSE connection and handle the message
+                # Create a modified scope that will establish SSE connection
+                modified_scope = dict(scope)
+                modified_scope["path"] = "/messages"
+                # Add a dummy session_id to make SSE transport happy
+                modified_scope["query_string"] = b"session_id=temp"
+                
+                # Actually, this won't work. Let's try a different approach:
+                # Handle it as a direct HTTP request-response
+                # We'll need to manually process the MCP message
+                response = await _handle_direct_mcp_request(request_data)
+                
+                await send({
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [[b"content-type", b"application/json"]],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": json.dumps(response).encode("utf-8"),
+                })
+                return
+            except Exception as e:
+                logger.error(f"Error handling direct POST request: {e}", exc_info=True)
+                await send({
+                    "type": "http.response.start",
+                    "status": 500,
+                    "headers": [[b"content-type", b"application/json"]],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": json.dumps({
+                        "jsonrpc": "2.0",
+                        "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
+                        "id": request_data.get("id") if 'request_data' in locals() else None
+                    }).encode("utf-8"),
+                })
+                return
+        
         # The SSE transport expects /messages path, so we modify the scope
-        logger.info("POST /mcp - Handling message")
+        logger.info("POST /mcp - Handling message with session_id")
         # Create a modified scope with /messages path for SSE transport compatibility
         modified_scope = dict(scope)
         modified_scope["path"] = "/messages"
