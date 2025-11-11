@@ -83,59 +83,101 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
             return result
         elif method == "tools/list":
             # Call the server's list_tools handler directly
-            tools = await list_tools()
-            # Convert Tool objects to dicts
-            tools_list = []
-            for tool in tools:
-                tools_list.append({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "inputSchema": tool.inputSchema
-                })
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "tools": tools_list
+            logger.info("Handling tools/list request")
+            try:
+                tools = await list_tools()
+                logger.info(f"Got {len(tools)} tools")
+                # Convert Tool objects to dicts
+                tools_list = []
+                for tool in tools:
+                    tools_list.append({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "inputSchema": tool.inputSchema
+                    })
+                logger.info(f"Returning {len(tools_list)} tools")
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "tools": tools_list
+                    }
                 }
-            }
+            except Exception as e:
+                logger.error(f"Error in tools/list: {e}", exc_info=True)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Failed to list tools: {str(e)}"
+                    },
+                    "id": request_id
+                }
         elif method == "resources/list":
             # Call the server's list_resources handler directly
-            resources = await list_resources()
-            # Convert Resource objects to dicts
-            resources_list = []
-            for resource in resources:
-                resources_list.append({
-                    "uri": resource.uri,
-                    "name": resource.name,
-                    "mimeType": resource.mimeType,
-                    "description": resource.description
-                })
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "resources": resources_list
+            logger.info("Handling resources/list request")
+            try:
+                resources = await list_resources()
+                logger.info(f"Got {len(resources)} resources")
+                # Convert Resource objects to dicts
+                resources_list = []
+                for resource in resources:
+                    resources_list.append({
+                        "uri": resource.uri,
+                        "name": resource.name,
+                        "mimeType": resource.mimeType,
+                        "description": resource.description
+                    })
+                logger.info(f"Returning {len(resources_list)} resources")
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "resources": resources_list
+                    }
                 }
-            }
+            except Exception as e:
+                logger.error(f"Error in resources/list: {e}", exc_info=True)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Failed to list resources: {str(e)}"
+                    },
+                    "id": request_id
+                }
         elif method == "prompts/list":
             # Call the server's list_prompts handler directly
-            prompts = await list_prompts()
-            # Convert Prompt objects to dicts
-            prompts_list = []
-            for prompt in prompts:
-                prompts_list.append({
-                    "name": prompt.name,
-                    "description": prompt.description,
-                    "arguments": prompt.arguments
-                })
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "prompts": prompts_list
+            logger.info("Handling prompts/list request")
+            try:
+                prompts = await list_prompts()
+                logger.info(f"Got {len(prompts)} prompts")
+                # Convert Prompt objects to dicts
+                prompts_list = []
+                for prompt in prompts:
+                    prompts_list.append({
+                        "name": prompt.name,
+                        "description": prompt.description,
+                        "arguments": prompt.arguments
+                    })
+                logger.info(f"Returning {len(prompts_list)} prompts")
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "prompts": prompts_list
+                    }
                 }
-            }
+            except Exception as e:
+                logger.error(f"Error in prompts/list: {e}", exc_info=True)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Failed to list prompts: {str(e)}"
+                    },
+                    "id": request_id
+                }
         elif method == "tools/call":
             # Call tool execution
             logger.info(f"Direct HTTP tools/call: {params.get('name')}")

@@ -102,14 +102,80 @@ async def test_http_server():
             print(f"   ✗ Error: {e}")
             return False
 
-        # Test 4: Direct HTTP - Read resource
-        print("\n4. Testing direct HTTP resources/read...")
+        # Test 4: Direct HTTP - List resources
+        print("\n4. Testing direct HTTP resources/list...")
         try:
             response = await client.post(
                 f"{base_url}/mcp",
                 json={
                     "jsonrpc": "2.0",
                     "id": 4,
+                    "method": "resources/list",
+                    "params": {}
+                }
+            )
+            if response.status_code == 200:
+                result = response.json()
+                if "error" in result:
+                    print(f"   ✗ Error: {result['error']}")
+                    print(f"   Error details: {json.dumps(result['error'], indent=2)}")
+                    return False
+                else:
+                    resources_count = len(result.get("result", {}).get("resources", []))
+                    print(f"   ✓ Listed {resources_count} resources")
+                    if resources_count > 0:
+                        print(f"   First resource: {result['result']['resources'][0]['uri']}")
+            else:
+                print(f"   ✗ Status: {response.status_code}")
+                print(f"   Response: {response.text}")
+                return False
+        except Exception as e:
+            print(f"   ✗ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+        # Test 5: Direct HTTP - List prompts
+        print("\n5. Testing direct HTTP prompts/list...")
+        try:
+            response = await client.post(
+                f"{base_url}/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "prompts/list",
+                    "params": {}
+                }
+            )
+            if response.status_code == 200:
+                result = response.json()
+                if "error" in result:
+                    print(f"   ✗ Error: {result['error']}")
+                    print(f"   Error details: {json.dumps(result['error'], indent=2)}")
+                    return False
+                else:
+                    prompts_count = len(result.get("result", {}).get("prompts", []))
+                    print(f"   ✓ Listed {prompts_count} prompts")
+                    if prompts_count > 0:
+                        print(f"   First prompt: {result['result']['prompts'][0]['name']}")
+            else:
+                print(f"   ✗ Status: {response.status_code}")
+                print(f"   Response: {response.text}")
+                return False
+        except Exception as e:
+            print(f"   ✗ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+        # Test 6: Direct HTTP - Read resource
+        print("\n6. Testing direct HTTP resources/read...")
+        try:
+            response = await client.post(
+                f"{base_url}/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 6,
                     "method": "resources/read",
                     "params": {
                         "uri": "archwiki://Installation_guide"
