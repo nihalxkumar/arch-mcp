@@ -6,7 +6,7 @@ A Model Context Protocol server that bridges AI assistants with the Arch Linux
 ecosystem, providing access to the Arch Wiki, AUR, and official repositories.
 """
 
-__version__ = "0.1.0"
+__version__ = "3.0.0"
 
 from .wiki import search_wiki, get_wiki_page, get_wiki_page_as_text
 from .aur import (
@@ -75,19 +75,19 @@ from .server import server
 async def main():
     """
     Main entry point for the MCP server.
-    Runs the server using STDIO transport.
+    Runs the server using STDIO transport (default for Docker MCP Catalog).
     """
     import asyncio
     import mcp.server.stdio
     import logging
-    
+
     # Set up logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
-    
-    logger.info("Starting Arch Linux MCP Server")
+
+    logger.info("Starting Arch Linux MCP Server (STDIO)")
     logger.info(f"Running on Arch Linux: {IS_ARCH}")
-    
+
     # Run the server using STDIO
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
@@ -98,9 +98,18 @@ async def main():
 
 
 def main_sync():
-    """Synchronous wrapper for the main function."""
+    """Synchronous wrapper for the main function (STDIO transport)."""
     import asyncio
     asyncio.run(main())
+
+
+def main_http_sync():
+    """
+    Main entry point for HTTP server (for Smithery).
+    Runs the server using SSE (Server-Sent Events) HTTP transport.
+    """
+    from .http_server import main_http
+    main_http()
 
 __all__ = [
     # Wiki
@@ -163,4 +172,5 @@ __all__ = [
     # Main functions
     "main",
     "main_sync",
+    "main_http_sync",
 ]
