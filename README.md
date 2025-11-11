@@ -1,5 +1,7 @@
 # Arch Linux MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@nihalxkumar/arch-mcp)](https://smithery.ai/server/@nihalxkumar/arch-mcp)
+
 <a href="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp/badge" />
 </a>
