@@ -87,22 +87,22 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
         request_id = request_data.get("id")
         
         if method == "initialize":
-            # Handle initialize request - use server's initialization options
-            init_options = server.create_initialization_options()
+            # Handle initialize request
+            # Return a basic initialize response matching MCP protocol
             result = {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": {
                     "protocolVersion": params.get("protocolVersion", "2025-06-18"),
-                    "capabilities": init_options.get("capabilities", {
+                    "capabilities": {
                         "tools": {},
                         "resources": {},
                         "prompts": {},
-                    }),
-                    "serverInfo": init_options.get("serverInfo", {
+                    },
+                    "serverInfo": {
                         "name": "arch-ops-server",
                         "version": "3.0.0"
-                    })
+                    }
                 }
             }
             return result
