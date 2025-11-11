@@ -28,7 +28,8 @@ try:
 except ImportError:
     SSE_AVAILABLE = False
 
-from .server import server, list_tools, list_resources, list_prompts
+from .server import server, list_tools, list_resources, list_prompts, call_tool, read_resource, get_prompt
+from . import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                     },
                     "serverInfo": {
                         "name": "arch-ops-server",
-                        "version": "3.0.0"
+                        "version": __version__
                     }
                 }
             }
@@ -135,6 +136,166 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                     "prompts": prompts_list
                 }
             }
+        elif method == "tools/call":
+            # Call tool execution
+            logger.info(f"Direct HTTP tools/call: {params.get('name')}")
+            tool_name = params.get("name", "")
+            tool_arguments = params.get("arguments", {})
+            
+            try:
+                # Execute the tool
+                result_content = await call_tool(tool_name, tool_arguments)
+                
+                # Convert content objects to dicts
+                content_list = []
+                for content in result_content:
+                    if hasattr(content, 'type') and content.type == "text":
+                        content_list.append({
+                            "type": "text",
+                            "text": content.text
+                        })
+                    elif hasattr(content, 'type') and content.type == "image":
+                        content_list.append({
+                            "type": "image",
+                            "data": content.data,
+                            "mimeType": content.mimeType
+                        })
+                    elif hasattr(content, 'type') and content.type == "resource":
+                        content_list.append({
+                            "type": "resource",
+                            "resource": {
+                                "uri": content.resource.uri,
+                                "mimeType": content.resource.mimeType,
+                                "text": content.resource.text if hasattr(content.resource, 'text') else None,
+                                "blob": content.resource.blob if hasattr(content.resource, 'blob') else None,
+                            }
+                        })
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": content_list
+                    }
+                }
+            except ValueError as e:
+                # Tool not found or invalid arguments
+                logger.error(f"Tool error: {e}")
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": str(e)
+                    },
+                    "id": request_id
+                }
+            except Exception as e:
+                # Other errors during tool execution
+                logger.error(f"Tool execution error: {e}", exc_info=True)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Tool execution failed: {str(e)}"
+                    },
+                    "id": request_id
+                }
+        elif method == "resources/read":
+            # Read resource
+            logger.info(f"Direct HTTP resources/read: {params.get('uri')}")
+            uri = params.get("uri", "")
+            
+            try:
+                # Read the resource
+                resource_content = await read_resource(uri)
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "contents": [
+                            {
+                                "uri": uri,
+                                "mimeType": "text/plain",
+                                "text": resource_content
+                            }
+                        ]
+                    }
+                }
+            except ValueError as e:
+                # Resource not found or invalid URI
+                logger.error(f"Resource error: {e}")
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": str(e)
+                    },
+                    "id": request_id
+                }
+            except Exception as e:
+                # Other errors during resource read
+                logger.error(f"Resource read error: {e}", exc_info=True)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Resource read failed: {str(e)}"
+                    },
+                    "id": request_id
+                }
+        elif method == "prompts/get":
+            # Get prompt
+            logger.info(f"Direct HTTP prompts/get: {params.get('name')}")
+            prompt_name = params.get("name", "")
+            prompt_arguments = params.get("arguments", {})
+            
+            try:
+                # Get the prompt
+                prompt_result = await get_prompt(prompt_name, prompt_arguments)
+                
+                # Convert PromptMessage objects to dicts
+                messages_list = []
+                for message in prompt_result.messages:
+                    msg_dict = {
+                        "role": message.role,
+                        "content": {
+                            "type": "text",
+                            "text": message.content.text
+                        }
+                    }
+                    messages_list.append(msg_dict)
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "description": prompt_result.description,
+                        "messages": messages_list
+                    }
+                }
+            except ValueError as e:
+                # Prompt not found or invalid arguments
+                logger.error(f"Prompt error: {e}")
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": str(e)
+                    },
+                    "id": request_id
+                }
+            except Exception as e:
+                # Other errors during prompt generation
+                logger.error(f"Prompt generation error: {e}", exc_info=True)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Prompt generation failed: {str(e)}"
+                    },
+                    "id": request_id
+                }
         else:
             # For other methods, return method not found
             return {
