@@ -150,12 +150,20 @@ async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
     
     if method == "GET":
         # GET /mcp establishes SSE connection
+        # The SSE transport might check the path, so we ensure compatibility
         logger.info("GET /mcp - Establishing SSE connection")
+        # For GET, the path doesn't matter for connect_sse, but we keep original
         await handle_sse_raw(scope, receive, send)
     elif method == "POST":
         # POST /mcp sends messages
+        # The SSE transport expects /messages path, so we modify the scope
         logger.info("POST /mcp - Handling message")
-        await handle_messages_raw(scope, receive, send)
+        # Create a modified scope with /messages path for SSE transport compatibility
+        modified_scope = dict(scope)
+        modified_scope["path"] = "/messages"
+        # Preserve query string (includes session_id)
+        modified_scope["query_string"] = scope.get("query_string", b"")
+        await handle_messages_raw(modified_scope, receive, send)
     elif method == "DELETE":
         # DELETE /mcp closes connection
         logger.info("DELETE /mcp - Closing connection")
