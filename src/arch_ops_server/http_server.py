@@ -117,17 +117,23 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
             # Call the server's list_resources handler directly
             logger.info("Handling resources/list request")
             try:
+                # Ensure we await the async function properly
                 resources = await list_resources()
                 logger.info(f"Got {len(resources)} resources")
                 # Convert Resource objects to dicts
                 resources_list = []
                 for resource in resources:
-                    resources_list.append({
-                        "uri": resource.uri,
-                        "name": resource.name,
-                        "mimeType": resource.mimeType,
-                        "description": resource.description
-                    })
+                    try:
+                        resources_list.append({
+                            "uri": str(resource.uri),
+                            "name": str(resource.name) if resource.name else "",
+                            "mimeType": str(resource.mimeType) if resource.mimeType else "text/plain",
+                            "description": str(resource.description) if resource.description else ""
+                        })
+                    except Exception as e:
+                        logger.error(f"Error converting resource to dict: {e}", exc_info=True)
+                        # Skip this resource but continue with others
+                        continue
                 logger.info(f"Returning {len(resources_list)} resources")
                 return {
                     "jsonrpc": "2.0",
@@ -138,6 +144,8 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                 }
             except Exception as e:
                 logger.error(f"Error in resources/list: {e}", exc_info=True)
+                import traceback
+                logger.error(traceback.format_exc())
                 return {
                     "jsonrpc": "2.0",
                     "error": {
@@ -150,16 +158,22 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
             # Call the server's list_prompts handler directly
             logger.info("Handling prompts/list request")
             try:
+                # Ensure we await the async function properly
                 prompts = await list_prompts()
                 logger.info(f"Got {len(prompts)} prompts")
                 # Convert Prompt objects to dicts
                 prompts_list = []
                 for prompt in prompts:
-                    prompts_list.append({
-                        "name": prompt.name,
-                        "description": prompt.description,
-                        "arguments": prompt.arguments
-                    })
+                    try:
+                        prompts_list.append({
+                            "name": str(prompt.name),
+                            "description": str(prompt.description) if prompt.description else "",
+                            "arguments": prompt.arguments if prompt.arguments else []
+                        })
+                    except Exception as e:
+                        logger.error(f"Error converting prompt to dict: {e}", exc_info=True)
+                        # Skip this prompt but continue with others
+                        continue
                 logger.info(f"Returning {len(prompts_list)} prompts")
                 return {
                     "jsonrpc": "2.0",
@@ -170,6 +184,8 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                 }
             except Exception as e:
                 logger.error(f"Error in prompts/list: {e}", exc_info=True)
+                import traceback
+                logger.error(traceback.format_exc())
                 return {
                     "jsonrpc": "2.0",
                     "error": {
@@ -475,117 +491,160 @@ async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
         receive: ASGI receive callable
         send: ASGI send callable
     """
+async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
+    """
+    Raw ASGI handler for /mcp endpoint (Smithery requirement).
+    
+    Smithery expects a single /mcp endpoint that handles:
+    - GET: Establish SSE connection (streamable HTTP)
+    - POST: Send messages
+    - DELETE: Close connection
+    
+    Args:
+        scope: ASGI scope dictionary
+        receive: ASGI receive callable
+        send: ASGI send callable
+    """
     method = scope.get("method", "")
     
-    if method == "GET":
-        # GET /mcp establishes SSE connection
-        # The SSE transport might check the path, so we ensure compatibility
-        logger.info("GET /mcp - Establishing SSE connection")
-        # For GET, the path doesn't matter for connect_sse, but we keep original
-        await handle_sse_raw(scope, receive, send)
-    elif method == "POST":
-        # POST /mcp sends messages
-        # Check if session_id exists in query string
-        query_string = scope.get("query_string", b"").decode("utf-8")
-        has_session_id = "session_id" in query_string
-        
-        if not has_session_id:
-            # Smithery POSTs directly without establishing SSE connection first
-            # Handle as regular HTTP request-response (non-SSE)
-            logger.info("POST /mcp without session_id - handling as regular HTTP request")
-            try:
-                # Read request body
-                body = b""
-                more_body = True
-                while more_body:
-                    message = await receive()
-                    if message["type"] == "http.request":
-                        body += message.get("body", b"")
-                        more_body = message.get("more_body", False)
-                
-                # Parse JSON-RPC request
-                import json
-                request_data = json.loads(body.decode("utf-8"))
-                
-                # Process the request through the MCP server
-                # Create a temporary session-like handler
-                from io import BytesIO
-                import sys
-                
-                # Use SSE transport but create a session on-the-fly
-                # Actually, we need to handle this differently - create a one-off connection
-                logger.info(f"Processing MCP request: {request_data.get('method', 'unknown')}")
-                
-                # For now, try to establish SSE connection and handle the message
-                # Create a modified scope that will establish SSE connection
-                modified_scope = dict(scope)
-                modified_scope["path"] = "/messages"
-                # Add a dummy session_id to make SSE transport happy
-                modified_scope["query_string"] = b"session_id=temp"
-                
-                # Actually, this won't work. Let's try a different approach:
-                # Handle it as a direct HTTP request-response
-                # We'll need to manually process the MCP message
-                response = await _handle_direct_mcp_request(request_data)
-                
-                await send({
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [[b"content-type", b"application/json"]],
-                })
-                await send({
-                    "type": "http.response.body",
-                    "body": json.dumps(response).encode("utf-8"),
-                })
-                return
-            except Exception as e:
-                logger.error(f"Error handling direct POST request: {e}", exc_info=True)
-                await send({
-                    "type": "http.response.start",
-                    "status": 500,
-                    "headers": [[b"content-type", b"application/json"]],
-                })
-                await send({
-                    "type": "http.response.body",
-                    "body": json.dumps({
+    # Wrap everything in a try-except to catch any unhandled exceptions
+    try:
+        if method == "GET":
+            # GET /mcp establishes SSE connection
+            # The SSE transport might check the path, so we ensure compatibility
+            logger.info("GET /mcp - Establishing SSE connection")
+            # For GET, the path doesn't matter for connect_sse, but we keep original
+            await handle_sse_raw(scope, receive, send)
+        elif method == "POST":
+            # POST /mcp sends messages
+            # Check if session_id exists in query string
+            query_string = scope.get("query_string", b"").decode("utf-8")
+            has_session_id = "session_id" in query_string
+            
+            if not has_session_id:
+                # Smithery POSTs directly without establishing SSE connection first
+                # Handle as regular HTTP request-response (non-SSE)
+                logger.info("POST /mcp without session_id - handling as regular HTTP request")
+                request_data = None
+                try:
+                    # Read request body
+                    body = b""
+                    more_body = True
+                    while more_body:
+                        message = await receive()
+                        if message["type"] == "http.request":
+                            body += message.get("body", b"")
+                            more_body = message.get("more_body", False)
+                    
+                    # Parse JSON-RPC request
+                    import json
+                    request_data = json.loads(body.decode("utf-8"))
+                    logger.info(f"Processing MCP request: {request_data.get('method', 'unknown')}")
+                    
+                    # Handle it as a direct HTTP request-response
+                    response = await _handle_direct_mcp_request(request_data)
+                    
+                    await send({
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [[b"content-type", b"application/json"], [b"access-control-allow-origin", b"*"]],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": json.dumps(response).encode("utf-8"),
+                    })
+                    return
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decode error: {e}", exc_info=True)
+                    import json
+                    await send({
+                        "type": "http.response.start",
+                        "status": 400,
+                        "headers": [[b"content-type", b"application/json"]],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": json.dumps({
+                            "jsonrpc": "2.0",
+                            "error": {"code": -32700, "message": f"Parse error: {str(e)}"},
+                            "id": None
+                        }).encode("utf-8"),
+                    })
+                    return
+                except Exception as e:
+                    logger.error(f"Error handling direct POST request: {e}", exc_info=True)
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    import json
+                    await send({
+                        "type": "http.response.start",
+                        "status": 500,
+                        "headers": [[b"content-type", b"application/json"]],
+                    })
+                    error_response = {
                         "jsonrpc": "2.0",
                         "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
-                        "id": request_data.get("id") if 'request_data' in locals() else None
-                    }).encode("utf-8"),
-                })
-                return
-        
-        # The SSE transport expects /messages path, so we modify the scope
-        logger.info("POST /mcp - Handling message with session_id")
-        # Create a modified scope with /messages path for SSE transport compatibility
-        modified_scope = dict(scope)
-        modified_scope["path"] = "/messages"
-        # Preserve query string (includes session_id)
-        modified_scope["query_string"] = scope.get("query_string", b"")
-        await handle_messages_raw(modified_scope, receive, send)
-    elif method == "DELETE":
-        # DELETE /mcp closes connection
-        logger.info("DELETE /mcp - Closing connection")
-        # SSE connections are closed when the stream ends, so just return 200
-        await send({
-            "type": "http.response.start",
-            "status": 200,
-            "headers": [[b"content-type", b"text/plain"]],
-        })
-        await send({
-            "type": "http.response.body",
-            "body": b"Connection closed",
-        })
-    else:
-        await send({
-            "type": "http.response.start",
-            "status": 405,
-            "headers": [[b"content-type", b"text/plain"]],
-        })
-        await send({
-            "type": "http.response.body",
-            "body": f"Method {method} not allowed".encode(),
-        })
+                        "id": request_data.get("id") if request_data else None
+                    }
+                    await send({
+                        "type": "http.response.body",
+                        "body": json.dumps(error_response).encode("utf-8"),
+                    })
+                    return
+            
+            # The SSE transport expects /messages path, so we modify the scope
+            logger.info("POST /mcp - Handling message with session_id")
+            # Create a modified scope with /messages path for SSE transport compatibility
+            modified_scope = dict(scope)
+            modified_scope["path"] = "/messages"
+            # Preserve query string (includes session_id)
+            modified_scope["query_string"] = scope.get("query_string", b"")
+            await handle_messages_raw(modified_scope, receive, send)
+        elif method == "DELETE":
+            # DELETE /mcp closes connection
+            logger.info("DELETE /mcp - Closing connection")
+            # SSE connections are closed when the stream ends, so just return 200
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [[b"content-type", b"text/plain"]],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": b"Connection closed",
+            })
+        else:
+            await send({
+                "type": "http.response.start",
+                "status": 405,
+                "headers": [[b"content-type", b"text/plain"]],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": f"Method {method} not allowed".encode(),
+            })
+    except Exception as e:
+        # Catch any unhandled exceptions at the top level
+        logger.error(f"Unhandled exception in handle_mcp_raw: {e}", exc_info=True)
+        import traceback
+        logger.error(traceback.format_exc())
+        import json
+        try:
+            await send({
+                "type": "http.response.start",
+                "status": 500,
+                "headers": [[b"content-type", b"application/json"]],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": json.dumps({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32603, "message": f"Internal server error: {str(e)}"},
+                    "id": None
+                }).encode("utf-8"),
+            })
+        except Exception as send_error:
+            logger.error(f"Failed to send error response: {send_error}", exc_info=True)
 
 
 async def handle_mcp(request: Request) -> None:
