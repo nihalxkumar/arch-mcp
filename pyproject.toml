@@ -1,6 +1,6 @@
 [project]
 name = "arch-ops-server"
-version = "3.0.0"
+version = "3.0.1"
 description = "MCP server bridging AI assistants with Arch Linux ecosystem (Wiki, AUR, official repos)"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = { text = "GPL-3.0-only OR MIT" }
@@ -32,6 +32,7 @@ dependencies = [
 
 [project.scripts]
 arch-ops-server = "arch_ops_server:main_sync"
+arch-ops-server-http = "arch_ops_server:main_http_sync"
 
 [project.optional-dependencies]
 dev = [
@@ -40,6 +41,10 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
     "httpx>=0.27.0",  # For testing async HTTP
+]
+http = [
+    "starlette>=0.27.0",
+    "uvicorn[standard]>=0.23.0",
 ]
 
 [tool.pytest.ini_options]

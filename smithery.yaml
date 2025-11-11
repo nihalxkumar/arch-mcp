@@ -1,6 +1,15 @@
 runtime: "container"
 build:
-  dockerfile: "DOCKERFILE"
+  dockerfile: "Dockerfile.smithery"
   dockerBuildPath: "."
 startCommand:
   type: "http"
+  configSchema:
+    type: "object"
+    properties:
+      debug:
+        type: "boolean"
+        title: "Debug Mode"
+        description: "Enable debug logging for troubleshooting"
+        default: false
+    required: []
