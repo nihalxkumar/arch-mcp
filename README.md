@@ -1,5 +1,7 @@
 # Arch Linux MCP Server
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/arch-ops-server?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLUE&right_color=BLACK&left_text=PyPi+Downloads)](https://pepy.tech/projects/arch-ops-server)
+
 <a href="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp/badge" />
 </a>
