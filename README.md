@@ -211,7 +211,9 @@ Contributions are greatly appreciated. Please feel free to submit a pull request
 
 This project is dual-licensed under your choice of:
 
-- **[GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.en.html)** - See [LICENSE-GPL](LICENSE-GPL)
-- **[MIT License](https://opensource.org/licenses/MIT)** - See [LICENSE-MIT](LICENSE-MIT)
+- **[GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.en.html)** - For those who prefer strong copyleft protections. See [LICENSE-GPL](LICENSE-GPL)
+- **[MIT License](https://opensource.org/licenses/MIT)** - For broader compatibility and adoption, including use in proprietary software and compatibility with platforms like Docker MCP Catalog. See [LICENSE-MIT](LICENSE-MIT)
 
-You may use this software under the terms of either license. See [LICENSE](LICENSE) for more details.
+You may use this software under the terms of either license. When redistributing or modifying this software, you may choose which license to apply.
+
+By contributing to this project, you agree that your contributions will be licensed under both licenses.
