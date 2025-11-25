@@ -16,17 +16,18 @@ Leverage AI to get  output for digestible, structured results that are ready for
 
 ## Sneak Peak into what's available
 
-<details open>
-<summary>Claude Desktop (no terminal)</summary>
+<details>
 
-![Claude Desktop Demo](assets/claudedesktop_signalcli.gif)
+<summary>Using VS Code Sonnet 3.5 for Safe Installation from AUR</summary>
+
+![VS Code Demo](assets/vscode_notesnook.gif)
 
 </details>
 
 <details>
-<summary>VS Code (with terminal)</summary>
+<summary> Asking Claude Code Sonnet 4.5 for fedora equivalent command </summary>
 
-![VS Code Demo](assets/vscode_notesnook.gif)
+![Equivalent Command Demo](assets/equivalent-commands.gif)
 
 </details>
 
@@ -35,11 +36,13 @@ Leverage AI to get  output for digestible, structured results that are ready for
 Direct access to Arch ecosystem data via custom URI schemes:
 
 #### Documentation & Search
+
 | URI Scheme | Example | Returns |
 |------------|---------|---------|
 | `archwiki://` | `archwiki://Installation_guide` | Markdown-formatted Wiki page |
 
 #### Package Information
+
 | URI Scheme | Example | Returns |
 |------------|---------|---------|
 | `archrepo://` | `archrepo://vim` | Official repository package details |
@@ -47,6 +50,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `aur://*/pkgbuild` | `aur://yay/pkgbuild` | Raw PKGBUILD with safety analysis |
 
 #### System Packages (Arch only)
+
 | URI Scheme | Example | Returns |
 |------------|---------|---------|
 | `pacman://installed` | `pacman://installed` | System installed packages list |
@@ -57,6 +61,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `pacman://database/freshness` | `pacman://database/freshness` | Package database sync status |
 
 #### System Monitoring & Logs
+
 | URI Scheme | Example | Returns |
 |------------|---------|---------|
 | `system://info` | `system://info` | System information (kernel, memory, uptime) |
@@ -67,6 +72,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `pacman://log/failed` | `pacman://log/failed` | Failed package transactions |
 
 #### News & Updates
+
 | URI Scheme | Example | Returns |
 |------------|---------|---------|
 | `archnews://latest` | `archnews://latest` | Latest Arch Linux news |
@@ -74,6 +80,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `archnews://since-update` | `archnews://since-update` | News since last system update |
 
 #### Configuration
+
 | URI Scheme | Example | Returns |
 |------------|---------|---------|
 | `config://pacman` | `config://pacman` | Parsed pacman.conf configuration |
@@ -84,6 +91,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 ### Tools (Executable Functions)
 
 #### Package Search & Information
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `search_archwiki` | Query Arch Wiki with ranked results | Any |
@@ -91,6 +99,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `get_official_package_info` | Get official package details (hybrid local/remote) | Any |
 
 #### Package Lifecycle Management
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `check_updates_dry_run` | Check for available updates | Arch only |
@@ -99,6 +108,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `remove_packages_batch` | Remove multiple packages efficiently | Arch only |
 
 #### Package Analysis & Maintenance
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `list_orphan_packages` | Find orphaned packages | Arch only |
@@ -109,6 +119,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `mark_as_dependency` | Allow package to be orphaned | Arch only |
 
 #### Package Organization
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `find_package_owner` | Find which package owns a file | Arch only |
@@ -118,6 +129,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `list_group_packages` | Show packages in specific group | Arch only |
 
 #### System Monitoring & Diagnostics
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `get_system_info` | System info (kernel, memory, uptime) | Any |
@@ -128,6 +140,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `check_database_freshness` | Check package database sync status | Arch only |
 
 #### Transaction History & Logs
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `get_transaction_history` | Recent package transactions (install/upgrade/remove) | Arch only |
@@ -136,6 +149,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `get_database_sync_history` | Database sync events | Arch only |
 
 #### News & Safety Checks
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `get_latest_news` | Fetch Arch Linux news from RSS | Any |
@@ -143,6 +157,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `get_news_since_last_update` | News posted since last system update | Arch only |
 
 #### Mirror Management
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `list_active_mirrors` | Show configured mirrors | Arch only |
@@ -151,6 +166,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `check_mirrorlist_health` | Verify mirror configuration | Arch only |
 
 #### Configuration Management
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `analyze_pacman_conf` | Parse pacman.conf settings | Arch only |
@@ -159,6 +175,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | `get_parallel_downloads_setting` | Get parallel download config | Arch only |
 
 #### Security Analysis
+
 | Tool | Description | Platform |
 |------|-------------|----------|
 | `analyze_pkgbuild_safety` | Comprehensive PKGBUILD analysis (50+ red flags) | Any |
@@ -178,6 +195,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 ## Installation
 
 ### Prerequisites
+
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
@@ -186,6 +204,7 @@ Direct access to Arch ecosystem data via custom URI schemes:
 ```bash
 uvx arch-ops-server
 ```
+
 ---
 
 ## Configuration
@@ -219,3 +238,4 @@ This project is dual-licensed under your choice of:
 You may use this software under the terms of either license. When redistributing or modifying this software, you may choose which license to apply.
 
 By contributing to this project, you agree that your contributions will be licensed under both licenses.
+
