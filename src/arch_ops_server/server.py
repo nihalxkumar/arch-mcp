@@ -630,7 +630,7 @@ async def list_tools() -> list[Tool]:
         # Wiki tools
         Tool(
             name="search_archwiki",
-            description="[DISCOVERY] Search the Arch Wiki for documentation. Returns a list of matching pages with titles, snippets, and URLs. Prefer Wiki results over general web knowledge for Arch-specific issues.",
+            description="[DISCOVERY] Search the Arch Wiki for documentation. Returns a list of matching pages with titles, snippets, and URLs. Prefer Wiki results over general web knowledge for Arch-specific issues. Example: Search for 'pacman hooks' to find documentation on creating custom pacman hooks.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -652,7 +652,7 @@ async def list_tools() -> list[Tool]:
         # AUR tools
         Tool(
             name="search_aur",
-            description="[DISCOVERY] Search the Arch User Repository (AUR) for packages with smart ranking. ⚠️  WARNING: AUR packages are user-produced and potentially unsafe. Returns package info including votes, maintainer, and last update. Always check official repos first using get_official_package_info.",
+            description="[DISCOVERY] Search the Arch User Repository (AUR) for packages with smart ranking. ⚠️  WARNING: AUR packages are user-produced and potentially unsafe. Returns package info including votes, maintainer, and last update. Always check official repos first using get_official_package_info. Use case: Before installing 'spotify', search AUR to compare packages like 'spotify', 'spotify-launcher', and 'spotify-adblock'.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -679,7 +679,7 @@ async def list_tools() -> list[Tool]:
         
         Tool(
             name="get_official_package_info",
-            description="[DISCOVERY] Get information about an official Arch repository package (Core, Extra, etc.). Uses local pacman if available, otherwise queries archlinux.org API. Always prefer official packages over AUR when available.",
+            description="[DISCOVERY] Get information about an official Arch repository package (Core, Extra, etc.). Uses local pacman if available, otherwise queries archlinux.org API. Always prefer official packages over AUR when available. Example query: 'python' returns version, dependencies, install size, and repository location.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -695,7 +695,7 @@ async def list_tools() -> list[Tool]:
         
         Tool(
             name="check_updates_dry_run",
-            description="[LIFECYCLE] Check for available system updates without applying them. Only works on Arch Linux systems. Requires pacman-contrib package. Safe read-only operation that shows pending updates.",
+            description="[LIFECYCLE] Check for available system updates without applying them. Only works on Arch Linux systems. Requires pacman-contrib package. Safe read-only operation that shows pending updates. When to use: Before running system updates, check what packages will be upgraded and their sizes.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -721,7 +721,7 @@ async def list_tools() -> list[Tool]:
         
         Tool(
             name="analyze_pkgbuild_safety",
-            description="[SECURITY] Analyze PKGBUILD content for security issues and dangerous patterns. Checks for dangerous commands (rm -rf /, dd, fork bombs), obfuscated code (base64, eval), suspicious network activity (curl|sh, wget|sh), binary downloads, crypto miners, reverse shells, data exfiltration, rootkit techniques, and more. Returns risk score (0-100) and detailed findings. Use this tool to manually audit AUR packages before installation.",
+            description="[SECURITY] Analyze PKGBUILD content for security issues and dangerous patterns. Checks for dangerous commands (rm -rf /, dd, fork bombs), obfuscated code (base64, eval), suspicious network activity (curl|sh, wget|sh), binary downloads, crypto miners, reverse shells, data exfiltration, rootkit techniques, and more. Returns risk score (0-100) and detailed findings. Use this tool to manually audit AUR packages before installation. Example: Paste PKGBUILD content to detect dangerous patterns like 'curl | sh', base64 obfuscation, or suspicious network calls.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -737,7 +737,7 @@ async def list_tools() -> list[Tool]:
         
         Tool(
             name="analyze_package_metadata_risk",
-            description="[SECURITY] Analyze AUR package metadata for trustworthiness and security indicators. Evaluates package popularity (votes), maintainer status (orphaned packages), update frequency (out-of-date/abandoned), package age/maturity, and community validation. Returns trust score (0-100) with risk factors and trust indicators. Use this alongside PKGBUILD analysis for comprehensive security assessment.",
+            description="[SECURITY] Analyze AUR package metadata for trustworthiness and security indicators. Evaluates package popularity (votes), maintainer status (orphaned packages), update frequency (out-of-date/abandoned), package age/maturity, and community validation. Returns trust score (0-100) with risk factors and trust indicators. Use this alongside PKGBUILD analysis for comprehensive security assessment. Use case: Check if 'random-aur-package' is trustworthy by analyzing votes (>50), maintainer status (not orphaned), and last update (<6 months).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -754,7 +754,7 @@ async def list_tools() -> list[Tool]:
         # Package Removal Tools
         Tool(
             name="remove_package",
-            description="[LIFECYCLE] Remove a package from the system. Supports various removal strategies: basic removal, removal with dependencies, or forced removal. Only works on Arch Linux. Requires sudo access.",
+            description="[LIFECYCLE] Remove a package from the system. Supports various removal strategies: basic removal, removal with dependencies, or forced removal. Only works on Arch Linux. Requires sudo access. Example: Remove 'firefox' with dependencies using remove_dependencies=true, or force removal with force=true (dangerous!).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -780,7 +780,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="remove_packages_batch",
-            description="[LIFECYCLE] Remove multiple packages in a single transaction. More efficient than removing packages one by one. Only works on Arch Linux. Requires sudo access.",
+            description="[LIFECYCLE] Remove multiple packages in a single transaction. More efficient than removing packages one by one. Only works on Arch Linux. Requires sudo access. Use case: Clean up multiple packages at once: ['package1', 'package2', 'package3'] with optional dependency removal.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -803,7 +803,7 @@ async def list_tools() -> list[Tool]:
         # Orphan Package Management
         Tool(
             name="list_orphan_packages",
-            description="[MAINTENANCE] List all orphaned packages (dependencies no longer required by any installed package). Shows package names and total disk space usage. Only works on Arch Linux.",
+            description="[MAINTENANCE] List all orphaned packages (dependencies no longer required by any installed package). Shows package names and total disk space usage. Only works on Arch Linux. When to use: After removing packages, find orphaned dependencies that are no longer needed.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -813,7 +813,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="remove_orphans",
-            description="[MAINTENANCE] Remove all orphaned packages to free up disk space. Supports dry-run mode to preview changes and package exclusion. Only works on Arch Linux. Requires sudo access.",
+            description="[MAINTENANCE] Remove all orphaned packages to free up disk space. Supports dry-run mode to preview changes and package exclusion. Only works on Arch Linux. Requires sudo access. Example: Use dry_run=true first to preview, then dry_run=false to actually remove. Exclude critical packages with exclude=['pkg1'].",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -836,7 +836,7 @@ async def list_tools() -> list[Tool]:
         # Package Ownership Tools
         Tool(
             name="find_package_owner",
-            description="[ORGANIZATION] Find which package owns a specific file on the system. Useful for troubleshooting and understanding file origins. Only works on Arch Linux.",
+            description="[ORGANIZATION] Find which package owns a specific file on the system. Useful for troubleshooting and understanding file origins. Only works on Arch Linux. Example: '/usr/bin/python' → returns 'python' package that owns this file.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -852,7 +852,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="list_package_files",
-            description="[ORGANIZATION] List all files owned by a package. Supports optional filtering by pattern. Only works on Arch Linux.",
+            description="[ORGANIZATION] List all files owned by a package. Supports optional filtering by pattern. Only works on Arch Linux. Use case: See all files installed by 'systemd' package, optionally filter with pattern='*.service'.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -872,7 +872,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="search_package_files",
-            description="[ORGANIZATION] Search for files across all packages in repositories. Requires package database sync (pacman -Fy). Only works on Arch Linux.",
+            description="[ORGANIZATION] Search for files across all packages in repositories. Requires package database sync (pacman -Fy). Only works on Arch Linux. Example: Search for '*.desktop' to find all packages that install desktop entries.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -889,7 +889,7 @@ async def list_tools() -> list[Tool]:
         # Package Verification
         Tool(
             name="verify_package_integrity",
-            description="[MAINTENANCE] Verify the integrity of installed package files. Detects modified, missing, or corrupted files. Only works on Arch Linux.",
+            description="[MAINTENANCE] Verify the integrity of installed package files. Detects modified, missing, or corrupted files. Only works on Arch Linux. When to use: After system crash or disk errors, verify 'linux' package files match expected checksums.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -911,7 +911,7 @@ async def list_tools() -> list[Tool]:
         # Package Groups
         Tool(
             name="list_package_groups",
-            description="[ORGANIZATION] List all available package groups (e.g., base, base-devel, gnome). Only works on Arch Linux.",
+            description="[ORGANIZATION] List all available package groups (e.g., base, base-devel, gnome). Only works on Arch Linux. Example: Returns groups like 'base', 'base-devel', 'gnome', 'kde-applications'.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -921,7 +921,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="list_group_packages",
-            description="[ORGANIZATION] List all packages in a specific group. Only works on Arch Linux.",
+            description="[ORGANIZATION] List all packages in a specific group. Only works on Arch Linux. Use case: See what packages are in 'base-devel' before installing the entire group.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -938,7 +938,7 @@ async def list_tools() -> list[Tool]:
         # Install Reason Management
         Tool(
             name="list_explicit_packages",
-            description="[MAINTENANCE] List all packages explicitly installed by the user (not installed as dependencies). Useful for creating backup lists or understanding system composition. Only works on Arch Linux.",
+            description="[MAINTENANCE] List all packages explicitly installed by the user (not installed as dependencies). Useful for creating backup lists or understanding system composition. Only works on Arch Linux. When to use: Find packages you explicitly installed (vs dependencies) for system documentation.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -948,7 +948,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="mark_as_explicit",
-            description="[MAINTENANCE] Mark a package as explicitly installed. Prevents it from being removed as an orphan. Only works on Arch Linux.",
+            description="[MAINTENANCE] Mark a package as explicitly installed. Prevents it from being removed as an orphan. Only works on Arch Linux. Example: Mark 'python-pip' as explicit if you want to keep it even when dependencies change.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -964,7 +964,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="mark_as_dependency",
-            description="[MAINTENANCE] Mark a package as a dependency. Allows it to be removed as an orphan if no packages depend on it. Only works on Arch Linux.",
+            description="[MAINTENANCE] Mark a package as a dependency. Allows it to be removed as an orphan if no packages depend on it. Only works on Arch Linux. Use case: Mark 'lib32-gcc-libs' as dependency so it can be auto-removed with orphans later.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -981,7 +981,7 @@ async def list_tools() -> list[Tool]:
         # System Diagnostic Tools
         Tool(
             name="get_system_info",
-            description="[MONITORING] Get comprehensive system information including kernel version, architecture, hostname, uptime, and memory statistics. Works on any system.",
+            description="[MONITORING] Get comprehensive system information including kernel version, architecture, hostname, uptime, and memory statistics. Works on any system. Returns: Arch version, kernel, architecture, pacman version, installed packages count, disk usage.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -991,7 +991,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="check_disk_space",
-            description="[MONITORING] Check disk space usage for critical filesystem paths including root, home, var, and pacman cache. Warns when space is low. Works on any system.",
+            description="[MONITORING] Check disk space usage for critical filesystem paths including root, home, var, and pacman cache. Warns when space is low. Works on any system. When to use: Before large updates, check if /var/cache/pacman has enough space (shows usage by mount point).",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1001,7 +1001,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="get_pacman_cache_stats",
-            description="[MONITORING] Analyze pacman package cache statistics including size, package count, and cache age. Only works on Arch Linux.",
+            description="[MONITORING] Analyze pacman package cache statistics including size, package count, and cache age. Only works on Arch Linux. Example output: Cache size 2.3GB, 450 packages, oldest package from 2023-01-15.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1011,7 +1011,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="check_failed_services",
-            description="[MONITORING] Check for failed systemd services. Useful for diagnosing system issues. Works on systemd-based systems.",
+            description="[MONITORING] Check for failed systemd services. Useful for diagnosing system issues. Works on systemd-based systems. Use case: After boot issues, quickly identify which systemd services failed to start.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1021,7 +1021,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="get_boot_logs",
-            description="[MONITORING] Retrieve recent boot logs from journalctl. Useful for troubleshooting boot issues. Works on systemd-based systems.",
+            description="[MONITORING] Retrieve recent boot logs from journalctl. Useful for troubleshooting boot issues. Works on systemd-based systems. Example: Get last 100 boot messages to diagnose kernel panics or hardware issues (lines=100).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1039,7 +1039,7 @@ async def list_tools() -> list[Tool]:
         # News Tools
         Tool(
             name="get_latest_news",
-            description="[DISCOVERY] Fetch recent Arch Linux news from RSS feed. Returns title, date, summary, and link for each news item.",
+            description="[DISCOVERY] Fetch recent Arch Linux news from RSS feed. Returns title, date, summary, and link for each news item. When to use: Before system updates, check archlinux.org news for manual interventions required.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1060,7 +1060,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="check_critical_news",
-            description="[DISCOVERY] Check for critical Arch Linux news requiring manual intervention. Scans recent news for keywords: 'manual intervention', 'action required', 'breaking change', etc.",
+            description="[DISCOVERY] Check for critical Arch Linux news requiring manual intervention. Scans recent news for keywords: 'manual intervention', 'action required', 'breaking change', etc. Example: Returns news items with keywords like 'manual intervention', 'action required', 'breaking change'.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1077,7 +1077,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="get_news_since_last_update",
-            description="[DISCOVERY] Get news posted since last pacman update. Parses /var/log/pacman.log for last update timestamp. Only works on Arch Linux.",
+            description="[DISCOVERY] Get news posted since last pacman update. Parses /var/log/pacman.log for last update timestamp. Only works on Arch Linux. Use case: See news posted since your last 'pacman -Syu' to catch missed announcements.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1088,7 +1088,7 @@ async def list_tools() -> list[Tool]:
         # Transaction Log Tools
         Tool(
             name="get_transaction_history",
-            description="[HISTORY] Get recent package transactions from pacman log. Shows installed, upgraded, and removed packages. Only works on Arch Linux.",
+            description="[HISTORY] Get recent package transactions from pacman log. Shows installed, upgraded, and removed packages. Only works on Arch Linux. Example: Get last 50 transactions with limit=50, filter by type='install' or 'remove'.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1111,7 +1111,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="find_when_installed",
-            description="[HISTORY] Find when a package was first installed and its upgrade history. Only works on Arch Linux.",
+            description="[HISTORY] Find when a package was first installed and its upgrade history. Only works on Arch Linux. Use case: Check when 'docker' was installed and what version it was.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1127,7 +1127,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="find_failed_transactions",
-            description="[HISTORY] Find failed package transactions in pacman log. Only works on Arch Linux.",
+            description="[HISTORY] Find failed package transactions in pacman log. Only works on Arch Linux. When to use: After pacman errors, see which transactions failed and why.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1137,7 +1137,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="get_database_sync_history",
-            description="[HISTORY] Get database synchronization history. Shows when 'pacman -Sy' was run. Only works on Arch Linux.",
+            description="[HISTORY] Get database synchronization history. Shows when 'pacman -Sy' was run. Only works on Arch Linux. Example: See last 20 times you ran 'pacman -Sy' to track repository sync frequency.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1155,7 +1155,7 @@ async def list_tools() -> list[Tool]:
         # Mirror Management Tools
         Tool(
             name="list_active_mirrors",
-            description="[MIRRORS] List currently configured mirrors from mirrorlist. Only works on Arch Linux.",
+            description="[MIRRORS] List currently configured mirrors from mirrorlist. Only works on Arch Linux. Returns: Current mirrors from /etc/pacman.d/mirrorlist with their URLs and countries.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1165,7 +1165,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="test_mirror_speed",
-            description="[MIRRORS] Test mirror response time. Can test a specific mirror or all active mirrors. Only works on Arch Linux.",
+            description="[MIRRORS] Test mirror response time. Can test a specific mirror or all active mirrors. Only works on Arch Linux. Example: Test specific mirror 'https://mirror.example.com' or all active mirrors if no URL provided.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1181,7 +1181,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="suggest_fastest_mirrors",
-            description="[MIRRORS] Suggest optimal mirrors based on official mirror status from archlinux.org. Filters by country if specified.",
+            description="[MIRRORS] Suggest optimal mirrors based on official mirror status from archlinux.org. Filters by country if specified. Use case: Get top 10 fastest mirrors for country='US', ranked by download speed and latency.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1202,7 +1202,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="check_mirrorlist_health",
-            description="[MIRRORS] Verify mirror configuration health. Checks for common issues like no active mirrors, outdated mirrorlist, high latency. Only works on Arch Linux.",
+            description="[MIRRORS] Verify mirror configuration health. Checks for common issues like no active mirrors, outdated mirrorlist, high latency. Only works on Arch Linux. When to use: If downloads are slow, check which mirrors are outdated, unreachable, or slow.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1213,7 +1213,7 @@ async def list_tools() -> list[Tool]:
         # Configuration Tools
         Tool(
             name="analyze_pacman_conf",
-            description="[CONFIG] Parse and analyze pacman.conf. Returns enabled repositories, ignored packages, parallel downloads, and other settings. Only works on Arch Linux.",
+            description="[CONFIG] Parse and analyze pacman.conf. Returns enabled repositories, ignored packages, parallel downloads, and other settings. Only works on Arch Linux. Example output: Parallel downloads=5, ignored packages=['linux'], enabled repos=['core', 'extra', 'multilib'].",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1223,7 +1223,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="analyze_makepkg_conf",
-            description="[CONFIG] Parse and analyze makepkg.conf. Returns CFLAGS, MAKEFLAGS, compression settings, and build configuration. Only works on Arch Linux.",
+            description="[CONFIG] Parse and analyze makepkg.conf. Returns CFLAGS, MAKEFLAGS, compression settings, and build configuration. Only works on Arch Linux. Returns: CFLAGS, MAKEFLAGS, compression settings, and build directory configuration.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1233,7 +1233,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="check_ignored_packages",
-            description="[CONFIG] List packages ignored in updates from pacman.conf. Warns if critical system packages are ignored. Only works on Arch Linux.",
+            description="[CONFIG] List packages ignored in updates from pacman.conf. Warns if critical system packages are ignored. Only works on Arch Linux. Use case: See which packages are in IgnorePkg/IgnoreGroup to understand why they don't update.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1243,7 +1243,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="get_parallel_downloads_setting",
-            description="[CONFIG] Get parallel downloads configuration from pacman.conf and provide recommendations. Only works on Arch Linux.",
+            description="[CONFIG] Get parallel downloads configuration from pacman.conf and provide recommendations. Only works on Arch Linux. Example: Returns current ParallelDownloads value (default=5) from pacman.conf.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1253,7 +1253,7 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="check_database_freshness",
-            description="[MAINTENANCE] Check when package databases were last synchronized. Warns if databases are stale (> 24 hours). Only works on Arch Linux.",
+            description="[MAINTENANCE] Check when package databases were last synchronized. Warns if databases are stale (> 24 hours). Only works on Arch Linux. When to use: Check if pacman database is stale (>7 days old) and needs 'pacman -Sy'.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1263,7 +1263,7 @@ async def list_tools() -> list[Tool]:
         
         Tool(
             name="run_system_health_check",
-            description="[MONITORING] Run a comprehensive system health check. Integrates multiple diagnostics to provide a complete overview of system status, including disk space, failed services, updates, orphan packages, and more. Only works on Arch Linux.",
+            description="[MONITORING] Run a comprehensive system health check. Integrates multiple diagnostics to provide a complete overview of system status, including disk space, failed services, updates, orphan packages, and more. Only works on Arch Linux. Comprehensive check: Updates available, disk space, failed services, database freshness, orphans, and critical news.",
             inputSchema={
                 "type": "object",
                 "properties": {}
