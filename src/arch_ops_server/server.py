@@ -15,6 +15,7 @@ from mcp.server import Server
 from mcp.types import (
     Resource,
     Tool,
+    ToolAnnotations,
     TextContent,
     ImageContent,
     EmbeddedResource,
@@ -76,6 +77,8 @@ from . import (
     analyze_makepkg_conf,
     check_ignored_packages,
     get_parallel_downloads_setting,
+    # System health check
+    run_system_health_check,
     # Utils
     IS_ARCH,
     run_command,
@@ -302,6 +305,13 @@ async def list_resources() -> list[Resource]:
             mimeType="application/json",
             description="Check when package databases were last synchronized"
         ),
+        # System health resources
+        Resource(
+            uri="system://health",
+            name="System - Health Check",
+            mimeType="application/json",
+            description="Comprehensive system health check report"
+        ),
     ]
 
 
@@ -482,6 +492,11 @@ async def read_resource(uri: str) -> str:
             else:
                 raise ValueError(result.get("error", "Failed to get boot logs"))
 
+        elif resource_path == "health":
+            # Get system health check
+            result = await run_system_health_check()
+            return json.dumps(result, indent=2)
+
         else:
             raise ValueError(f"Unsupported system resource: {resource_path}")
 
@@ -579,7 +594,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["query"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
         
         # AUR tools
@@ -606,7 +622,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["query"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
         
         Tool(
@@ -621,7 +638,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
         
         Tool(
@@ -630,7 +648,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
         
         Tool(
@@ -645,7 +664,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(destructiveHint=True)
         ),
         
         Tool(
@@ -660,7 +680,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["pkgbuild_content"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
         
         Tool(
@@ -675,7 +696,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_info"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # Package Removal Tools
@@ -701,7 +723,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(destructiveHint=True)
         ),
 
         Tool(
@@ -722,7 +745,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_names"]
-            }
+            },
+            annotations=ToolAnnotations(destructiveHint=True)
         ),
 
         # Orphan Package Management
@@ -732,7 +756,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -753,7 +778,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(destructiveHint=True)
         ),
 
         # Package Ownership Tools
@@ -769,7 +795,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["file_path"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -788,7 +815,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -803,7 +831,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["filename_pattern"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # Package Verification
@@ -824,7 +853,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # Package Groups
@@ -834,7 +864,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -849,7 +880,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["group_name"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # Install Reason Management
@@ -859,7 +891,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -874,7 +907,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(destructiveHint=True)
         ),
 
         Tool(
@@ -889,7 +923,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(destructiveHint=True)
         ),
 
         # System Diagnostic Tools
@@ -899,7 +934,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -908,7 +944,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -917,7 +954,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -926,7 +964,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -942,7 +981,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # News Tools
@@ -963,7 +1003,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -979,7 +1020,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -988,7 +1030,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # Transaction Log Tools
@@ -1011,7 +1054,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1026,7 +1070,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["package_name"]
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1035,7 +1080,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1051,7 +1097,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # Mirror Management Tools
@@ -1061,7 +1108,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1076,7 +1124,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1096,7 +1145,8 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1105,7 +1155,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         # Configuration Tools
@@ -1115,7 +1166,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1124,7 +1176,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1133,7 +1186,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1142,7 +1196,8 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
         Tool(
@@ -1151,7 +1206,18 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {}
-            }
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
+        ),
+        
+        Tool(
+            name="run_system_health_check",
+            description="[MONITORING] Run a comprehensive system health check. Integrates multiple diagnostics to provide a complete overview of system status, including disk space, failed services, updates, orphan packages, and more. Only works on Arch Linux.",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
         ),
     ]
 
@@ -1465,6 +1531,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
             return [TextContent(type="text", text="Error: get_parallel_downloads_setting only available on Arch Linux systems")]
         
         result = await get_parallel_downloads_setting()
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+    
+    elif name == "run_system_health_check":
+        if not IS_ARCH:
+            return [TextContent(type="text", text="Error: run_system_health_check only available on Arch Linux systems")]
+        
+        result = await run_system_health_check()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "check_database_freshness":

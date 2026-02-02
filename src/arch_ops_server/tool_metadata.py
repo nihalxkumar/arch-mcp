@@ -457,6 +457,25 @@ TOOL_METADATA = {
         related_tools=["analyze_pacman_conf"],
         prerequisite_tools=[]
     ),
+    "run_system_health_check": ToolMetadata(
+        name="run_system_health_check",
+        category="monitoring",
+        platform="arch",
+        permission="read",
+        workflow="diagnose",
+        related_tools=[
+            "get_system_info",
+            "check_disk_space",
+            "check_failed_services",
+            "get_pacman_cache_stats",
+            "check_updates_dry_run",
+            "check_critical_news",
+            "list_orphan_packages",
+            "check_database_freshness",
+            "check_mirrorlist_health"
+        ],
+        prerequisite_tools=[]
+    ),
 }
 
 
