@@ -95,6 +95,57 @@ server = Server("arch-ops-server")
 # HELPER FUNCTIONS
 # ============================================================================
 
+def create_platform_error_message(tool_name: str, current_platform: str = None) -> str:
+    """
+    Create an informative error message with recovery hints for platform-specific tools.
+    
+    Args:
+        tool_name: Name of the tool that requires Arch Linux
+        current_platform: Current platform/OS (auto-detected if not provided)
+    
+    Returns:
+        Formatted error message with recovery suggestions
+    """
+    import platform
+    
+    if current_platform is None:
+        try:
+            if IS_ARCH:
+                current_platform = "Arch Linux"
+            else:
+                import distro
+                current_platform = f"{distro.name()} {distro.version()}" if distro.name() else platform.system()
+        except:
+            current_platform = platform.system()
+    
+    error_msg = f"""Error: '{tool_name}' requires Arch Linux
+
+Current system: {current_platform}
+
+This tool requires a running Arch Linux system to function. However, you can still:
+
+Alternative actions:
+1. Use platform-agnostic tools:
+   - search_archwiki: Search Arch Wiki documentation (works anywhere)
+   - search_aur: Search AUR packages (works anywhere)
+   - get_official_package_info: Get package info from archlinux.org (works anywhere)
+   - get_latest_news: Check Arch Linux news (works anywhere)
+   - check_critical_news: Check for critical Arch news (works anywhere)
+
+2. Browse documentation resources:
+   - archwiki://<page_title> - Read any Arch Wiki page
+   - aur://<package>/info - Get AUR package metadata
+   - archrepo://<package> - Get official package details
+
+3. If you're planning to use Arch Linux:
+   - Visit the Arch Wiki Installation Guide: archwiki://Installation_guide
+   - Check latest Arch news before installing: get_latest_news
+
+Note: Tools marked with [DISCOVERY], [SECURITY], and news-related tools work on any system."""
+    
+    return error_msg
+
+
 def create_standard_output_schema(data_schema: dict, description: str = "") -> dict:
     """
     Create a standard output schema with status, data, error fields.
@@ -402,7 +453,7 @@ async def read_resource(uri: str) -> str:
     
     elif scheme == "pacman":
         if not IS_ARCH:
-            raise ValueError(f"pacman:// resources only available on Arch Linux systems")
+            raise ValueError(create_platform_error_message("pacman:// resources"))
 
         resource_path = parsed.netloc or parsed.path.lstrip('/')
 
@@ -523,7 +574,7 @@ async def read_resource(uri: str) -> str:
 
     elif scheme == "mirrors":
         if not IS_ARCH:
-            raise ValueError(f"mirrors:// resources only available on Arch Linux systems")
+            raise ValueError(create_platform_error_message("mirrors:// resources"))
 
         resource_path = parsed.netloc or parsed.path.lstrip('/')
 
@@ -542,7 +593,7 @@ async def read_resource(uri: str) -> str:
 
     elif scheme == "config":
         if not IS_ARCH:
-            raise ValueError(f"config:// resources only available on Arch Linux systems")
+            raise ValueError(create_platform_error_message("config:// resources"))
 
         resource_path = parsed.netloc or parsed.path.lstrip('/')
 
@@ -1259,14 +1310,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     
     elif name == "check_updates_dry_run":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: check_updates_dry_run only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("check_updates_dry_run"))]
         
         result = await check_updates_dry_run()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
     elif name == "install_package_secure":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: install_package_secure only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("install_package_secure"))]
         
         package_name = arguments["package_name"]
         result = await install_package_secure(package_name)
@@ -1285,7 +1336,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Package Removal Tools
     elif name == "remove_package":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: remove_package only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("remove_package"))]
 
         package_name = arguments["package_name"]
         remove_dependencies = arguments.get("remove_dependencies", False)
@@ -1295,7 +1346,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "remove_packages_batch":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: remove_packages_batch only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("remove_packages_batch"))]
 
         package_names = arguments["package_names"]
         remove_dependencies = arguments.get("remove_dependencies", False)
@@ -1305,14 +1356,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Orphan Package Management
     elif name == "list_orphan_packages":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: list_orphan_packages only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("list_orphan_packages"))]
 
         result = await list_orphan_packages()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "remove_orphans":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: remove_orphans only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("remove_orphans"))]
 
         dry_run = arguments.get("dry_run", True)
         exclude = arguments.get("exclude", None)
@@ -1322,7 +1373,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Package Ownership Tools
     elif name == "find_package_owner":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: find_package_owner only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("find_package_owner"))]
 
         file_path = arguments["file_path"]
         result = await find_package_owner(file_path)
@@ -1330,7 +1381,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "list_package_files":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: list_package_files only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("list_package_files"))]
 
         package_name = arguments["package_name"]
         filter_pattern = arguments.get("filter_pattern", None)
@@ -1339,7 +1390,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "search_package_files":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: search_package_files only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("search_package_files"))]
 
         filename_pattern = arguments["filename_pattern"]
         result = await search_package_files(filename_pattern)
@@ -1348,7 +1399,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Package Verification
     elif name == "verify_package_integrity":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: verify_package_integrity only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("verify_package_integrity"))]
 
         package_name = arguments["package_name"]
         thorough = arguments.get("thorough", False)
@@ -1358,14 +1409,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Package Groups
     elif name == "list_package_groups":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: list_package_groups only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("list_package_groups"))]
 
         result = await list_package_groups()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "list_group_packages":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: list_group_packages only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("list_group_packages"))]
 
         group_name = arguments["group_name"]
         result = await list_group_packages(group_name)
@@ -1374,14 +1425,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Install Reason Management
     elif name == "list_explicit_packages":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: list_explicit_packages only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("list_explicit_packages"))]
 
         result = await list_explicit_packages()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "mark_as_explicit":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: mark_as_explicit only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("mark_as_explicit"))]
 
         package_name = arguments["package_name"]
         result = await mark_as_explicit(package_name)
@@ -1389,7 +1440,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "mark_as_dependency":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: mark_as_dependency only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("mark_as_dependency"))]
 
         package_name = arguments["package_name"]
         result = await mark_as_dependency(package_name)
@@ -1406,7 +1457,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "get_pacman_cache_stats":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: get_pacman_cache_stats only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("get_pacman_cache_stats"))]
 
         result = await get_pacman_cache_stats()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
@@ -1434,7 +1485,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "get_news_since_last_update":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: get_news_since_last_update only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("get_news_since_last_update"))]
         
         result = await get_news_since_last_update()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
@@ -1442,7 +1493,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Transaction log tools
     elif name == "get_transaction_history":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: get_transaction_history only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("get_transaction_history"))]
         
         limit = arguments.get("limit", 50)
         transaction_type = arguments.get("transaction_type", "all")
@@ -1451,7 +1502,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "find_when_installed":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: find_when_installed only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("find_when_installed"))]
         
         package_name = arguments.get("package_name")
         if not package_name:
@@ -1462,14 +1513,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "find_failed_transactions":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: find_failed_transactions only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("find_failed_transactions"))]
         
         result = await find_failed_transactions()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "get_database_sync_history":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: get_database_sync_history only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("get_database_sync_history"))]
         
         limit = arguments.get("limit", 20)
         result = await get_database_sync_history(limit=limit)
@@ -1478,14 +1529,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Mirror management tools
     elif name == "list_active_mirrors":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: list_active_mirrors only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("list_active_mirrors"))]
         
         result = await list_active_mirrors()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "test_mirror_speed":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: test_mirror_speed only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("test_mirror_speed"))]
         
         mirror_url = arguments.get("mirror_url")
         result = await test_mirror_speed(mirror_url=mirror_url)
@@ -1499,7 +1550,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     elif name == "check_mirrorlist_health":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: check_mirrorlist_health only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("check_mirrorlist_health"))]
         
         result = await check_mirrorlist_health()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
@@ -1507,42 +1558,42 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
     # Configuration tools
     elif name == "analyze_pacman_conf":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: analyze_pacman_conf only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("analyze_pacman_conf"))]
         
         result = await analyze_pacman_conf()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "analyze_makepkg_conf":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: analyze_makepkg_conf only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("analyze_makepkg_conf"))]
         
         result = await analyze_makepkg_conf()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "check_ignored_packages":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: check_ignored_packages only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("check_ignored_packages"))]
         
         result = await check_ignored_packages()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "get_parallel_downloads_setting":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: get_parallel_downloads_setting only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("get_parallel_downloads_setting"))]
         
         result = await get_parallel_downloads_setting()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
     elif name == "run_system_health_check":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: run_system_health_check only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("run_system_health_check"))]
         
         result = await run_system_health_check()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "check_database_freshness":
         if not IS_ARCH:
-            return [TextContent(type="text", text="Error: check_database_freshness only available on Arch Linux systems")]
+            return [TextContent(type="text", text=create_platform_error_message("check_database_freshness"))]
         
         result = await check_database_freshness()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
@@ -1883,7 +1934,7 @@ paru -S {package_name}  # or yay -S {package_name}
                         role="assistant",
                         content=PromptMessage.TextContent(
                             type="text",
-                            text="Error: safe_system_update prompt only available on Arch Linux systems"
+                            text=create_platform_error_message("safe_system_update prompt")
                         )
                     )
                 ]
@@ -2038,7 +2089,7 @@ paru -S {package_name}  # or yay -S {package_name}
                         role="assistant",
                         content=PromptMessage.TextContent(
                             type="text",
-                            text="Error: cleanup_system prompt only available on Arch Linux systems"
+                            text=create_platform_error_message("cleanup_system prompt")
                         )
                     )
                 ]
@@ -2214,7 +2265,7 @@ Be detailed and provide specific mirror URLs and configuration commands."""
                         role="assistant",
                         content=PromptMessage.TextContent(
                             type="text",
-                            text="Error: system_health_check prompt only available on Arch Linux systems"
+                            text=create_platform_error_message("system_health_check prompt")
                         )
                     )
                 ]
