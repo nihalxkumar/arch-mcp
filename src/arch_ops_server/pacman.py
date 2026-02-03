@@ -861,6 +861,69 @@ async def search_package_files(filename_pattern: str) -> Dict[str, Any]:
         )
 
 
+async def query_file_ownership(
+    query: str,
+    mode: str,
+    filter_pattern: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Unified tool for querying file ownership relationships.
+    
+    This consolidates three operations:
+    - file_to_package: Find which package owns a specific file (replaces find_package_owner)
+    - package_to_files: List all files owned by a package (replaces list_package_files)
+    - filename_search: Search for files across all packages (replaces search_package_files)
+
+    Args:
+        query: The query string (file path, package name, or filename pattern depending on mode)
+        mode: Query mode - "file_to_package", "package_to_files", or "filename_search"
+        filter_pattern: Optional regex pattern to filter files (only used in package_to_files mode)
+
+    Returns:
+        Dict with query results appropriate to the mode
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "File ownership queries are only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    # Validate mode
+    valid_modes = ["file_to_package", "package_to_files", "filename_search"]
+    if mode not in valid_modes:
+        return create_error_response(
+            "ValidationError",
+            f"Invalid mode '{mode}'. Must be one of: {', '.join(valid_modes)}"
+        )
+
+    logger.info(f"File ownership query: mode={mode}, query={query}")
+
+    # Route to appropriate implementation based on mode
+    if mode == "file_to_package":
+        # Find which package owns a specific file (replaces find_package_owner)
+        return await find_package_owner(query)
+    
+    elif mode == "package_to_files":
+        # List all files owned by a package (replaces list_package_files)
+        return await list_package_files(query, filter_pattern)
+    
+    elif mode == "filename_search":
+        # Search for files across all packages (replaces search_package_files)
+        return await search_package_files(query)
+    
+    # This should never be reached due to validation above
+    return create_error_response(
+        "InternalError",
+        f"Unexpected mode: {mode}"
+    )
+
+
 async def verify_package_integrity(package_name: str, thorough: bool = False) -> Dict[str, Any]:
     """
     Verify integrity of an installed package.

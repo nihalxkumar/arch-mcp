@@ -45,6 +45,7 @@ from . import (
     find_package_owner,
     list_package_files,
     search_package_files,
+    query_file_ownership,
     verify_package_integrity,
     list_package_groups,
     list_group_packages,
@@ -833,58 +834,32 @@ async def list_tools() -> list[Tool]:
             annotations=ToolAnnotations(destructiveHint=True)
         ),
 
-        # Package Ownership Tools
+        # File Ownership Query (Consolidated)
         Tool(
-            name="find_package_owner",
-            description="[ORGANIZATION] Find which package owns a specific file on the system. Useful for troubleshooting and understanding file origins. Only works on Arch Linux. Example: '/usr/bin/python' → returns 'python' package that owns this file.",
+            name="query_file_ownership",
+            description="[ORGANIZATION] Unified tool for querying file-package ownership relationships. Supports three modes: 'file_to_package' (find which package owns a file), 'package_to_files' (list all files in a package with optional filtering), and 'filename_search' (search for files across all packages). Only works on Arch Linux. Examples: mode='file_to_package', query='/usr/bin/python' → returns 'python' package; mode='package_to_files', query='systemd', filter_pattern='*.service' → lists all systemd service files; mode='filename_search', query='*.desktop' → finds all packages with desktop entries.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "file_path": {
+                    "query": {
                         "type": "string",
-                        "description": "Absolute path to the file (e.g., /usr/bin/vim)"
-                    }
-                },
-                "required": ["file_path"]
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="list_package_files",
-            description="[ORGANIZATION] List all files owned by a package. Supports optional filtering by pattern. Only works on Arch Linux. Use case: See all files installed by 'systemd' package, optionally filter with pattern='*.service'.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "package_name": {
+                        "description": "Query string: file path for file_to_package mode, package name for package_to_files mode, or filename pattern for filename_search mode"
+                    },
+                    "mode": {
                         "type": "string",
-                        "description": "Name of the package"
+                        "enum": ["file_to_package", "package_to_files", "filename_search"],
+                        "description": "Query mode: 'file_to_package' (find package owner), 'package_to_files' (list package files), or 'filename_search' (search across packages)"
                     },
                     "filter_pattern": {
                         "type": "string",
-                        "description": "Optional regex pattern to filter files (e.g., '*.conf' or '/etc/')"
+                        "description": "Optional regex pattern to filter files (only used in package_to_files mode, e.g., '*.conf' or '/etc/')"
                     }
                 },
-                "required": ["package_name"]
+                "required": ["query", "mode"]
             },
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
-        Tool(
-            name="search_package_files",
-            description="[ORGANIZATION] Search for files across all packages in repositories. Requires package database sync (pacman -Fy). Only works on Arch Linux. Example: Search for '*.desktop' to find all packages that install desktop entries.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "filename_pattern": {
-                        "type": "string",
-                        "description": "File name or pattern to search for (e.g., 'vim' or '*.service')"
-                    }
-                },
-                "required": ["filename_pattern"]
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
 
         # Package Verification
         Tool(
@@ -1370,30 +1345,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await remove_orphans(dry_run, exclude)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-    # Package Ownership Tools
-    elif name == "find_package_owner":
+    # File Ownership Query (Consolidated)
+    elif name == "query_file_ownership":
         if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("find_package_owner"))]
+            return [TextContent(type="text", text=create_platform_error_message("query_file_ownership"))]
 
-        file_path = arguments["file_path"]
-        result = await find_package_owner(file_path)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "list_package_files":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("list_package_files"))]
-
-        package_name = arguments["package_name"]
+        query = arguments["query"]
+        mode = arguments["mode"]
         filter_pattern = arguments.get("filter_pattern", None)
-        result = await list_package_files(package_name, filter_pattern)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "search_package_files":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("search_package_files"))]
-
-        filename_pattern = arguments["filename_pattern"]
-        result = await search_package_files(filename_pattern)
+        result = await query_file_ownership(query, mode, filter_pattern)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Package Verification
