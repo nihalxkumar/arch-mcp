@@ -35,6 +35,7 @@ from .pacman import (
     list_explicit_packages,
     mark_as_explicit,
     mark_as_dependency,
+    manage_install_reason,
     check_database_freshness
 )
 from .system import (
@@ -143,6 +144,7 @@ __all__ = [
     "list_explicit_packages",
     "mark_as_explicit",
     "mark_as_dependency",
+    "manage_install_reason",
     "check_database_freshness",
     # System
     "get_system_info",

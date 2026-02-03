@@ -42,16 +42,11 @@ from . import (
     remove_packages_batch,
     list_orphan_packages,
     remove_orphans,
-    find_package_owner,
-    list_package_files,
-    search_package_files,
     query_file_ownership,
     verify_package_integrity,
     list_package_groups,
     list_group_packages,
-    list_explicit_packages,
-    mark_as_explicit,
-    mark_as_dependency,
+    manage_install_reason,
     check_database_freshness,
     # System functions
     get_system_info,
@@ -912,45 +907,24 @@ async def list_tools() -> list[Tool]:
 
         # Install Reason Management
         Tool(
-            name="list_explicit_packages",
-            description="[MAINTENANCE] List all packages explicitly installed by the user (not installed as dependencies). Useful for creating backup lists or understanding system composition. Only works on Arch Linux. When to use: Find packages you explicitly installed (vs dependencies) for system documentation.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="mark_as_explicit",
-            description="[MAINTENANCE] Mark a package as explicitly installed. Prevents it from being removed as an orphan. Only works on Arch Linux. Example: Mark 'python-pip' as explicit if you want to keep it even when dependencies change.",
+            name="manage_install_reason",
+            description="[MAINTENANCE] Unified tool for managing package install reasons. Supports three actions: 'list' (list all explicitly installed packages), 'mark_explicit' (prevent package from being removed as orphan), and 'mark_dependency' (allow package to be auto-removed with orphans). Only works on Arch Linux. Examples: action='list' → returns all user-installed packages; action='mark_explicit', package_name='python-pip' → keeps package even when dependencies change; action='mark_dependency', package_name='lib32-gcc-libs' → allows auto-removal with orphans.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "mark_explicit", "mark_dependency"],
+                        "description": "Action to perform: 'list' (list explicit packages), 'mark_explicit' (mark as user-installed), or 'mark_dependency' (mark as auto-removable)"
+                    },
                     "package_name": {
                         "type": "string",
-                        "description": "Name of the package to mark as explicit"
+                        "description": "Package name (required for mark_explicit and mark_dependency actions)"
                     }
                 },
-                "required": ["package_name"]
+                "required": ["action"]
             },
-            annotations=ToolAnnotations(destructiveHint=True)
-        ),
-
-        Tool(
-            name="mark_as_dependency",
-            description="[MAINTENANCE] Mark a package as a dependency. Allows it to be removed as an orphan if no packages depend on it. Only works on Arch Linux. Use case: Mark 'lib32-gcc-libs' as dependency so it can be auto-removed with orphans later.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "package_name": {
-                        "type": "string",
-                        "description": "Name of the package to mark as dependency"
-                    }
-                },
-                "required": ["package_name"]
-            },
-            annotations=ToolAnnotations(destructiveHint=True)
+            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)  # Mixed: list is read-only, marking is destructive
         ),
 
         # System Diagnostic Tools
@@ -1383,27 +1357,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Install Reason Management
-    elif name == "list_explicit_packages":
+    elif name == "manage_install_reason":
         if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("list_explicit_packages"))]
+            return [TextContent(type="text", text=create_platform_error_message("manage_install_reason"))]
 
-        result = await list_explicit_packages()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "mark_as_explicit":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("mark_as_explicit"))]
-
-        package_name = arguments["package_name"]
-        result = await mark_as_explicit(package_name)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "mark_as_dependency":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("mark_as_dependency"))]
-
-        package_name = arguments["package_name"]
-        result = await mark_as_dependency(package_name)
+        action = arguments["action"]
+        package_name = arguments.get("package_name", None)
+        result = await manage_install_reason(action, package_name)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # System Diagnostic Tools

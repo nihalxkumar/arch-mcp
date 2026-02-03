@@ -1276,6 +1276,75 @@ async def mark_as_dependency(package_name: str) -> Dict[str, Any]:
         )
 
 
+async def manage_install_reason(
+    action: str,
+    package_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Unified tool for managing package install reasons.
+    
+    This consolidates three operations:
+    - list: List all explicitly installed packages (replaces list_explicit_packages)
+    - mark_explicit: Mark a package as explicitly installed (replaces mark_as_explicit)
+    - mark_dependency: Mark a package as a dependency (replaces mark_as_dependency)
+
+    Args:
+        action: Action to perform - "list", "mark_explicit", or "mark_dependency"
+        package_name: Package name (required for mark_explicit and mark_dependency actions)
+
+    Returns:
+        Dict with operation results appropriate to the action
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Install reason management is only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    # Validate action
+    valid_actions = ["list", "mark_explicit", "mark_dependency"]
+    if action not in valid_actions:
+        return create_error_response(
+            "ValidationError",
+            f"Invalid action '{action}'. Must be one of: {', '.join(valid_actions)}"
+        )
+
+    # Validate package_name for marking actions
+    if action in ["mark_explicit", "mark_dependency"] and not package_name:
+        return create_error_response(
+            "ValidationError",
+            f"package_name is required for action '{action}'"
+        )
+
+    logger.info(f"Install reason management: action={action}, package={package_name}")
+
+    # Route to appropriate implementation based on action
+    if action == "list":
+        # List all explicitly installed packages
+        return await list_explicit_packages()
+    
+    elif action == "mark_explicit":
+        # Mark package as explicitly installed
+        return await mark_as_explicit(package_name)
+    
+    elif action == "mark_dependency":
+        # Mark package as dependency
+        return await mark_as_dependency(package_name)
+    
+    # This should never be reached due to validation above
+    return create_error_response(
+        "InternalError",
+        f"Unexpected action: {action}"
+    )
+
+
+
 async def check_database_freshness() -> Dict[str, Any]:
     """
     Check when package databases were last synchronized.
