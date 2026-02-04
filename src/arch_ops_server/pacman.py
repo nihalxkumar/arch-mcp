@@ -6,7 +6,7 @@ Provides package info and update checks with hybrid local/remote approach.
 
 import logging
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import httpx
 
 from .utils import (
