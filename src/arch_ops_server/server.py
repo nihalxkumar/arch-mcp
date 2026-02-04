@@ -40,8 +40,10 @@ from . import (
     check_updates_dry_run,
     remove_package,
     remove_packages_batch,
+    remove_packages,
     list_orphan_packages,
     remove_orphans,
+    manage_orphans,
     query_file_ownership,
     verify_package_integrity,
     list_package_groups,
@@ -747,20 +749,23 @@ async def list_tools() -> list[Tool]:
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
-        # Package Removal Tools
+        # Package Removal
         Tool(
-            name="remove_package",
-            description="[LIFECYCLE] Remove a package from the system. Supports various removal strategies: basic removal, removal with dependencies, or forced removal. Only works on Arch Linux. Requires sudo access. Example: Remove 'firefox' with dependencies using remove_dependencies=true, or force removal with force=true (dangerous!).",
+            name="remove_packages",
+            description="[LIFECYCLE] Unified tool for removing packages (single or multiple). Accepts either a single package name or a list of packages. Supports removal with dependencies and forced removal. Only works on Arch Linux. Requires sudo access. Examples: packages='firefox', remove_dependencies=true → removes Firefox with its dependencies; packages=['pkg1', 'pkg2', 'pkg3'] → batch removal of multiple packages; packages='lib', force=true → force removal ignoring dependencies (dangerous!).",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "package_name": {
-                        "type": "string",
-                        "description": "Name of the package to remove"
+                    "packages": {
+                        "oneOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}}
+                        ],
+                        "description": "Package name (string) or list of package names (array) to remove"
                     },
                     "remove_dependencies": {
                         "type": "boolean",
-                        "description": "Remove package and its dependencies (pacman -Rs). Default: false",
+                        "description": "Remove packages and their dependencies (pacman -Rs). Default: false",
                         "default": False
                     },
                     "force": {
@@ -769,64 +774,37 @@ async def list_tools() -> list[Tool]:
                         "default": False
                     }
                 },
-                "required": ["package_name"]
-            },
-            annotations=ToolAnnotations(destructiveHint=True)
-        ),
-
-        Tool(
-            name="remove_packages_batch",
-            description="[LIFECYCLE] Remove multiple packages in a single transaction. More efficient than removing packages one by one. Only works on Arch Linux. Requires sudo access. Use case: Clean up multiple packages at once: ['package1', 'package2', 'package3'] with optional dependency removal.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "package_names": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of package names to remove"
-                    },
-                    "remove_dependencies": {
-                        "type": "boolean",
-                        "description": "Remove packages and their dependencies. Default: false",
-                        "default": False
-                    }
-                },
-                "required": ["package_names"]
+                "required": ["packages"]
             },
             annotations=ToolAnnotations(destructiveHint=True)
         ),
 
         # Orphan Package Management
         Tool(
-            name="list_orphan_packages",
-            description="[MAINTENANCE] List all orphaned packages (dependencies no longer required by any installed package). Shows package names and total disk space usage. Only works on Arch Linux. When to use: After removing packages, find orphaned dependencies that are no longer needed.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="remove_orphans",
-            description="[MAINTENANCE] Remove all orphaned packages to free up disk space. Supports dry-run mode to preview changes and package exclusion. Only works on Arch Linux. Requires sudo access. Example: Use dry_run=true first to preview, then dry_run=false to actually remove. Exclude critical packages with exclude=['pkg1'].",
+            name="manage_orphans",
+            description="[MAINTENANCE] Unified tool for managing orphaned packages (dependencies no longer required). Supports two actions: 'list' (show orphaned packages) and 'remove' (remove orphaned packages). Only works on Arch Linux. Requires sudo access for removal. Examples: action='list' → shows all orphaned packages with disk usage; action='remove', dry_run=true → preview what would be removed; action='remove', dry_run=false, exclude=['pkg1'] → remove all orphans except 'pkg1'.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "remove"],
+                        "description": "Action to perform: 'list' (list orphaned packages) or 'remove' (remove orphaned packages)"
+                    },
                     "dry_run": {
                         "type": "boolean",
-                        "description": "Preview what would be removed without actually removing. Default: true",
+                        "description": "Preview what would be removed without actually removing (only for remove action). Default: true",
                         "default": True
                     },
                     "exclude": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of package names to exclude from removal"
+                        "description": "List of package names to exclude from removal (only for remove action)"
                     }
                 },
-                "required": []
+                "required": ["action"]
             },
-            annotations=ToolAnnotations(destructiveHint=True)
+            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)  # Mixed: list is read-only, remove is destructive
         ),
 
         # File Ownership Query (Consolidated)
@@ -1283,43 +1261,28 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Package Removal Tools
-    elif name == "remove_package":
+    elif name == "remove_packages":
         if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("remove_package"))]
+            return [TextContent(type="text", text=create_platform_error_message("remove_packages"))]
 
-        package_name = arguments["package_name"]
+        packages = arguments["packages"]
         remove_dependencies = arguments.get("remove_dependencies", False)
         force = arguments.get("force", False)
-        result = await remove_package(package_name, remove_dependencies, force)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "remove_packages_batch":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("remove_packages_batch"))]
-
-        package_names = arguments["package_names"]
-        remove_dependencies = arguments.get("remove_dependencies", False)
-        result = await remove_packages_batch(package_names, remove_dependencies)
+        result = await remove_packages(packages, remove_dependencies, force)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Orphan Package Management
-    elif name == "list_orphan_packages":
+    elif name == "manage_orphans":
         if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("list_orphan_packages"))]
+            return [TextContent(type="text", text=create_platform_error_message("manage_orphans"))]
 
-        result = await list_orphan_packages()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "remove_orphans":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("remove_orphans"))]
-
+        action = arguments["action"]
         dry_run = arguments.get("dry_run", True)
         exclude = arguments.get("exclude", None)
-        result = await remove_orphans(dry_run, exclude)
+        result = await manage_orphans(action, dry_run, exclude)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-    # File Ownership Query (Consolidated)
+    # File Ownership Query
     elif name == "query_file_ownership":
         if not IS_ARCH:
             return [TextContent(type="text", text=create_platform_error_message("query_file_ownership"))]
@@ -2027,7 +1990,7 @@ paru -S {package_name}  # or yay -S {package_name}
                         text=f"""Please perform a comprehensive system cleanup:
 
 1. **Check Orphaned Packages**:
-   - Run list_orphan_packages
+   - Run manage_orphans with action='list'
    - Review the list for packages that can be safely removed
    {'   - Be aggressive: remove all orphans unless critical' if aggressive else '   - Be conservative: keep packages that might be useful'}
 
@@ -2223,7 +2186,7 @@ Be detailed and provide specific mirror URLs and configuration commands."""
    - Identify any package operation failures
 
 5. **Package Integrity**:
-   - Run list_orphan_packages
+   - Run manage_orphans with action='list'
    - Count orphaned packages and space used
    - Suggest running verify_package_integrity on critical packages
 

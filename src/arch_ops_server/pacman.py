@@ -472,6 +472,70 @@ async def remove_packages_batch(
         )
 
 
+async def remove_packages(
+    packages: Union[str, List[str]],
+    remove_dependencies: bool = False,
+    force: bool = False
+) -> Dict[str, Any]:
+    """
+    Unified tool for removing packages (single or multiple).
+    
+    This consolidates two operations:
+    - Single package removal (replaces remove_package)
+    - Batch package removal (replaces remove_packages_batch)
+
+    Args:
+        packages: Package name (string) or list of package names to remove
+        remove_dependencies: If True, remove unneeded dependencies (pacman -Rs)
+        force: If True, force removal ignoring dependencies (pacman -Rdd). Only works for single package.
+
+    Returns:
+        Dict with removal status and information
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Package removal is only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    # Normalize input to list
+    if isinstance(packages, str):
+        package_list = [packages]
+        is_single = True
+    else:
+        package_list = packages
+        is_single = False
+
+    if not package_list:
+        return create_error_response(
+            "ValidationError",
+            "No packages specified for removal"
+        )
+
+    # Validate force flag usage
+    if force and not is_single:
+        return create_error_response(
+            "ValidationError",
+            "force flag can only be used with single package removal"
+        )
+
+    logger.info(f"Removing {len(package_list)} package(s): {package_list} (deps={remove_dependencies}, force={force})")
+
+    # Route to appropriate implementation based on input type and flags
+    if is_single:
+        # Single package removal
+        return await remove_package(package_list[0], remove_dependencies, force)
+    else:
+        # Batch package removal (force not supported)
+        return await remove_packages_batch(package_list, remove_dependencies)
+
+
 async def list_orphan_packages() -> Dict[str, Any]:
     """
     List all orphaned packages (dependencies no longer required).
@@ -626,6 +690,64 @@ async def remove_orphans(dry_run: bool = True, exclude: Optional[List[str]] = No
             "RemovalError",
             f"Failed to remove orphan packages: {str(e)}"
         )
+
+
+async def manage_orphans(
+    action: str,
+    dry_run: bool = True,
+    exclude: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Unified tool for managing orphaned packages.
+    
+    This consolidates two operations:
+    - list: List all orphaned packages (replaces list_orphan_packages)
+    - remove: Remove orphaned packages (replaces remove_orphans)
+
+    Args:
+        action: Action to perform - "list" or "remove"
+        dry_run: If True (default), show what would be removed without removing (only for remove action)
+        exclude: List of packages to exclude from removal (only for remove action)
+
+    Returns:
+        Dict with action results
+    """
+    if not IS_ARCH:
+        return create_error_response(
+            "NotSupported",
+            "Orphan package management is only available on Arch Linux"
+        )
+
+    if not check_command_exists("pacman"):
+        return create_error_response(
+            "CommandNotFound",
+            "pacman command not found"
+        )
+
+    # Validate action
+    valid_actions = ["list", "remove"]
+    if action not in valid_actions:
+        return create_error_response(
+            "ValidationError",
+            f"Invalid action '{action}'. Must be one of: {', '.join(valid_actions)}"
+        )
+
+    logger.info(f"Orphan management: action={action}, dry_run={dry_run}")
+
+    # Route to appropriate implementation based on action
+    if action == "list":
+        # List orphaned packages
+        return await list_orphan_packages()
+    
+    elif action == "remove":
+        # Remove orphaned packages
+        return await remove_orphans(dry_run, exclude)
+    
+    # This should never be reached due to validation above
+    return create_error_response(
+        "InternalError",
+        f"Unexpected action: {action}"
+    )
 
 
 async def find_package_owner(file_path: str) -> Dict[str, Any]:
