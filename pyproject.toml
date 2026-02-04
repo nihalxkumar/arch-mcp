@@ -1,33 +1,39 @@
 [project]
 name = "arch-ops-server"
-version = "3.3.3"
+version = "3.3.4"
 description = "MCP server bridging AI assistants with Arch Linux ecosystem (Wiki, AUR, official repos)"
-readme = {file = "README.md", content-type = "text/markdown"}
+readme = { file = "README.md", content-type = "text/markdown" }
 license = { text = "GPL-3.0-only OR MIT" }
-authors = [
-    { name = "Nihal", email = "2tv8xupqg@mozmail.com" }
+authors = [{ name = "Nihal", email = "2tv8xupqg@mozmail.com" }]
+keywords = [
+  "arch-linux",
+  "mcp",
+  "model-context-protocol",
+  "aur",
+  "pacman",
+  "wiki",
+  "ai-assistant",
 ]
-keywords = ["arch-linux", "mcp", "model-context-protocol", "aur", "pacman", "wiki", "ai-assistant"]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: System :: Archiving :: Packaging",
-    "Topic :: System :: Systems Administration",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Archiving :: Packaging",
+  "Topic :: System :: Systems Administration",
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.0.0",
-    "httpx>=0.27.0",
-    "beautifulsoup4>=4.12.0",
-    "lxml>=5.0.0",
-    "markdownify>=0.12.0",
+  "mcp>=1.0.0",
+  "httpx>=0.27.0",
+  "beautifulsoup4>=4.12.0",
+  "lxml>=5.0.0",
+  "markdownify>=0.12.0",
 ]
 
 [project.scripts]
@@ -36,16 +42,13 @@ arch-ops-server-http = "arch_ops_server:main_http_sync"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.12.0",
-    "httpx>=0.27.0",  # For testing async HTTP
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "pytest-cov>=4.1.0",
+  "pytest-mock>=3.12.0",
+  "httpx>=0.27.0",          # For testing async HTTP
 ]
-http = [
-    "starlette>=0.27.0",
-    "uvicorn[standard]>=0.23.0",
-]
+http = ["starlette>=0.27.0", "uvicorn[standard]>=0.23.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -55,11 +58,11 @@ python_functions = ["test_*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = [
-    "-v",
-    "--strict-markers",
-    "--cov=arch_ops_server",
-    "--cov-report=term-missing",
-    "--cov-report=html",
+  "-v",
+  "--strict-markers",
+  "--cov=arch_ops_server",
+  "--cov-report=term-missing",
+  "--cov-report=html",
 ]
 
 [tool.coverage.run]
@@ -68,12 +71,12 @@ omit = ["*/tests/*", "*/__pycache__/*"]
 
 [tool.coverage.report]
 exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
+  "pragma: no cover",
+  "def __repr__",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
 ]
 
 [build-system]

@@ -6,17 +6,17 @@ A Model Context Protocol server that bridges AI assistants with the Arch Linux
 ecosystem, providing access to the Arch Wiki, AUR, and official repositories.
 """
 
-__version__ = "3.3.3"
+__version__ = "3.3.4"
 
 from .wiki import search_wiki, get_wiki_page, get_wiki_page_as_text
 from .aur import (
-    search_aur, 
-    get_aur_info, 
-    get_pkgbuild, 
-    get_aur_file, 
-    analyze_pkgbuild_safety, 
+    search_aur,
+    get_aur_info,
+    get_pkgbuild,
+    get_aur_file,
+    analyze_pkgbuild_safety,
     analyze_package_metadata_risk,
-    install_package_secure
+    install_package_secure,
 )
 from .pacman import (
     get_official_package_info,
@@ -38,43 +38,40 @@ from .pacman import (
     mark_as_explicit,
     mark_as_dependency,
     manage_install_reason,
-    check_database_freshness
+    check_database_freshness,
 )
 from .system import (
     get_system_info,
     check_disk_space,
     get_pacman_cache_stats,
     check_failed_services,
-    get_boot_logs
+    get_boot_logs,
 )
 from .system_health_check import run_system_health_check
-from .news import (
-    get_latest_news,
-    check_critical_news,
-    get_news_since_last_update
-)
+from .news import get_latest_news, check_critical_news, get_news_since_last_update
 from .logs import (
     get_transaction_history,
     find_when_installed,
     find_failed_transactions,
-    get_database_sync_history
+    get_database_sync_history,
 )
 from .mirrors import (
     list_active_mirrors,
     test_mirror_speed,
     suggest_fastest_mirrors,
-    check_mirrorlist_health
+    check_mirrorlist_health,
 )
 from .config import (
     analyze_pacman_conf,
     analyze_makepkg_conf,
     check_ignored_packages,
-    get_parallel_downloads_setting
+    get_parallel_downloads_setting,
 )
 from .utils import IS_ARCH, run_command
 
 # Import server from the server module
 from .server import server
+
 
 # Main function will be defined here
 async def main():
@@ -96,15 +93,14 @@ async def main():
     # Run the server using STDIO
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options()
+            read_stream, write_stream, server.create_initialization_options()
         )
 
 
 def main_sync():
     """Synchronous wrapper for the main function (STDIO transport)."""
     import asyncio
+
     asyncio.run(main())
 
 
@@ -114,7 +110,9 @@ def main_http_sync():
     Runs the server using SSE (Server-Sent Events) HTTP transport.
     """
     from .http_server import main_http
+
     main_http()
+
 
 __all__ = [
     # Wiki
