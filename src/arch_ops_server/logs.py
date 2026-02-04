@@ -40,23 +40,37 @@ def parse_log_line(line: str) -> Optional[Dict[str, Any]]:
     if not match:
         return None
 
-    date_str, time_str, action, details = match.groups()
+    date_str, time_str, log_type, details = match.groups()
     timestamp = f"{date_str}T{time_str}:00"
 
-    # Parse package details
-    # Format: "package_name (version)" or "package_name (old -> new)"
-    pkg_match = re.match(r'(\S+)\s+\((.+)\)', details)
+    action = log_type
+    package = details
+    version_info = ""
 
-    if pkg_match:
-        package = pkg_match.group(1)
-        version_info = pkg_match.group(2)
-    else:
-        # Some log lines don't have version info
-        package = details
-        version_info = ""
+    # Parse ALPM actions
+    if log_type == "ALPM":
+        # Format: action package (version)
+        # e.g. installed vim (9.0.1000-1)
+        # e.g. upgraded linux (6.6.1-1 -> 6.6.2-1)
+        pkg_match = re.match(r'(\w+)\s+(\S+)\s+\((.+)\)', details)
+        
+        if pkg_match:
+            action = pkg_match.group(1)  # installed, upgraded, etc.
+            package = pkg_match.group(2)
+            version_info = pkg_match.group(3)
+    
+    # Fallback for old parsing or non-ALPM lines that might match the old regex
+    if action == log_type and log_type != "ALPM":
+         # Parse package details for generic logs if needed
+         # Format: "package_name (version)" or "package_name (old -> new)"
+         pkg_match = re.match(r'(\S+)\s+\((.+)\)', details)
+         if pkg_match:
+             package = pkg_match.group(1)
+             version_info = pkg_match.group(2)
 
     return {
         "timestamp": timestamp,
+        "source": log_type,
         "action": action,
         "package": package,
         "version_info": version_info,

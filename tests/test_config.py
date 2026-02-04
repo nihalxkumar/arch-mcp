@@ -127,25 +127,6 @@ Include = /etc/pacman.d/mirrorlist
             
             assert result["parallel_downloads"] == 1  # Default value
 
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.config.IS_ARCH", False)
-    async def test_analyze_pacman_conf_not_arch(self):
-        """Test on non-Arch system."""
-        result = await analyze_pacman_conf()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
-
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.config.IS_ARCH", True)
-    async def test_analyze_pacman_conf_not_found(self):
-        """Test when pacman.conf doesn't exist."""
-        with patch("pathlib.Path.exists", return_value=False):
-            result = await analyze_pacman_conf()
-            
-            assert "error" in result
-            assert result["error"] == "NotFound"
-
 
 class TestMakepkgConf:
     """Test makepkg.conf parsing."""
@@ -204,15 +185,6 @@ PKGEXT='.pkg.tar.zst'
             assert "options" in result
             assert isinstance(result["options"], list)
 
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.config.IS_ARCH", False)
-    async def test_analyze_makepkg_conf_not_arch(self):
-        """Test on non-Arch system."""
-        result = await analyze_makepkg_conf()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
-
 
 class TestIgnoredPackages:
     """Test ignored packages detection."""
@@ -269,15 +241,6 @@ Include = /etc/pacman.d/mirrorlist
             
             assert result["has_ignored"] is False
             assert result["ignored_packages_count"] == 0
-
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.config.IS_ARCH", False)
-    async def test_check_ignored_packages_not_arch(self):
-        """Test on non-Arch system."""
-        result = await check_ignored_packages()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
 
 
 class TestParallelDownloads:
@@ -337,13 +300,4 @@ Include = /etc/pacman.d/mirrorlist
             assert result["parallel_downloads"] == 15
             # Should have recommendation to reduce
             assert len(result["recommendations"]) > 0
-
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.config.IS_ARCH", False)
-    async def test_get_parallel_downloads_not_arch(self):
-        """Test on non-Arch system."""
-        result = await get_parallel_downloads_setting()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
 

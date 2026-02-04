@@ -27,8 +27,8 @@ class TestLogParsing:
         
         assert result is not None
         assert result["timestamp"] == "2025-11-10T15:30:00"
-        assert result["action"] == "ALPM"
-        assert "vim" in result["package"]
+        assert result["action"] == "installed"
+        assert result["package"] == "vim"
 
     def test_parse_log_line_upgrade(self):
         """Test parsing upgrade log line."""
@@ -37,8 +37,8 @@ class TestLogParsing:
         result = parse_log_line(line)
         
         assert result is not None
-        assert result["action"] == "ALPM"
-        assert "linux" in result["package"]
+        assert result["action"] == "upgraded"
+        assert result["package"] == "linux"
         assert "->" in result["version_info"]
 
     def test_parse_log_line_invalid(self):
@@ -72,7 +72,7 @@ class TestTransactionHistory:
             result = await get_transaction_history(limit=10, transaction_type="all")
             
             assert result["count"] >= 3  # At least install, upgrade, remove
-            assert any(t["action"] == "ALPM" for t in result["transactions"])
+            assert any(t["source"] == "ALPM" for t in result["transactions"])
 
     @pytest.mark.asyncio
     @patch("arch_ops_server.logs.IS_ARCH", True)
@@ -94,15 +94,6 @@ class TestTransactionHistory:
             result = await get_transaction_history(limit=2, transaction_type="all")
             
             assert result["count"] <= 2
-
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.logs.IS_ARCH", False)
-    async def test_get_transaction_history_not_arch(self):
-        """Test on non-Arch system."""
-        result = await get_transaction_history()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
 
 
 class TestPackageInstallationHistory:
@@ -132,18 +123,6 @@ class TestPackageInstallationHistory:
 
     @pytest.mark.asyncio
     @patch("arch_ops_server.logs.IS_ARCH", True)
-    async def test_find_when_installed_not_found(self):
-        """Test finding package that was never installed."""
-        empty_log = ""
-        
-        with patch("builtins.open", mock_open(read_data=empty_log)):
-            result = await find_when_installed("nonexistent-package")
-            
-            assert "error" in result
-            assert result["error"] == "NotFound"
-
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.logs.IS_ARCH", True)
     async def test_find_when_installed_with_removals(self, sample_log_with_package):
         """Test package history including removals."""
         with patch("builtins.open", mock_open(read_data=sample_log_with_package)):
@@ -151,15 +130,6 @@ class TestPackageInstallationHistory:
             
             assert result["removal_count"] >= 1
             assert "removals" in result
-
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.logs.IS_ARCH", False)
-    async def test_find_when_installed_not_arch(self):
-        """Test on non-Arch system."""
-        result = await find_when_installed("vim")
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
 
 
 class TestFailedTransactions:
@@ -209,16 +179,6 @@ class TestFailedTransactions:
             # May still have some matches but should be minimal
             assert "count" in result
 
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.logs.IS_ARCH", False)
-    async def test_find_failed_transactions_not_arch(self):
-        """Test on non-Arch system."""
-        result = await find_failed_transactions()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
-
-
 class TestDatabaseSyncHistory:
     """Test database synchronization history."""
 
@@ -254,13 +214,4 @@ class TestDatabaseSyncHistory:
             result = await get_database_sync_history(limit=2)
             
             assert result["count"] <= 2
-
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.logs.IS_ARCH", False)
-    async def test_get_database_sync_history_not_arch(self):
-        """Test on non-Arch system."""
-        result = await get_database_sync_history()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
 

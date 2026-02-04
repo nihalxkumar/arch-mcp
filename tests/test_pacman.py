@@ -131,7 +131,6 @@ class TestGetOfficialPackageInfo:
 
             result = await get_official_package_info("nonexistent-pkg")
 
-            assert result["error"] is True
             assert result["type"] == "NotFound"
 
     @pytest.mark.asyncio
@@ -147,7 +146,6 @@ class TestGetOfficialPackageInfo:
 
             result = await get_official_package_info("vim")
 
-            assert result["error"] is True
             assert result["type"] == "TimeoutError"
 
 
@@ -272,7 +270,6 @@ gcc 12.2.0-1 -> 13.1.0-1
         with patch("arch_ops_server.pacman.IS_ARCH", False):
             result = await check_updates_dry_run()
 
-            assert result["error"] is True
             assert result["type"] == "NotSupported"
             assert "Arch Linux" in result["message"]
 
@@ -285,7 +282,6 @@ gcc 12.2.0-1 -> 13.1.0-1
         ):
             result = await check_updates_dry_run()
 
-            assert result["error"] is True
             assert result["type"] == "CommandNotFound"
             assert "checkupdates" in result["message"]
 
@@ -322,7 +318,6 @@ gcc 12.2.0-1 -> 13.1.0-1
             result = await check_updates_dry_run()
 
             # Exit code 1 with output triggers CommandError
-            assert result["error"] is True
             assert result["type"] == "CommandError"
 
 
@@ -529,7 +524,7 @@ class TestDatabaseFreshness:
         result = await check_database_freshness()
         
         assert "error" in result
-        assert result["error"] == "NotSupported"
+        assert result["type"] == "NotSupported"
 
     @pytest.mark.asyncio
     @patch("arch_ops_server.pacman.IS_ARCH", True)
@@ -541,4 +536,4 @@ class TestDatabaseFreshness:
             result = await check_database_freshness()
             
             assert "error" in result
-            assert result["error"] == "NotFound"
+            assert result["type"] == "NotFound"

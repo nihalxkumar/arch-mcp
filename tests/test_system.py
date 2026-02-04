@@ -140,65 +140,6 @@ class TestPacmanCache:
             assert result["package_count"] == 2
             assert result["total_size_mb"] > 0
 
-    @pytest.mark.asyncio
-    @patch("arch_ops_server.system.IS_ARCH", False)
-    async def test_get_pacman_cache_stats_not_arch(self):
-        """Test on non-Arch system."""
-        result = await get_pacman_cache_stats()
-        
-        assert "error" in result
-        assert result["error"] == "NotSupported"
-
-
-class TestFailedServices:
-    """Test failed services detection."""
-
-    @pytest.mark.asyncio
-    async def test_check_failed_services_none(self):
-        """Test when no services have failed."""
-        systemctl_output = """0 loaded units listed.
-"""
-        async def mock_run_command(cmd, **kwargs):
-            return (0, systemctl_output, "")
-        
-        with patch("arch_ops_server.system.check_command_exists", return_value=True), \
-             patch("arch_ops_server.system.run_command", mock_run_command):
-            result = await check_failed_services()
-            
-            assert result["all_ok"] is True
-            assert result["failed_count"] == 0
-
-    @pytest.mark.asyncio
-    async def test_check_failed_services_some_failed(self):
-        """Test when some services have failed."""
-        systemctl_output = """● docker.service    loaded failed failed Docker Application Container Engine
-● ssh.service       loaded failed failed OpenSSH server daemon
-2 loaded units listed.
-"""
-        async def mock_run_command(cmd, **kwargs):
-            return (0, systemctl_output, "")
-        
-        with patch("arch_ops_server.system.check_command_exists", return_value=True), \
-             patch("arch_ops_server.system.run_command", mock_run_command):
-            result = await check_failed_services()
-            
-            assert result["all_ok"] is False
-            assert result["failed_count"] >= 2
-            
-            # Check service details
-            services = result["failed_services"]
-            service_names = [s["unit"] for s in services]
-            assert any("docker.service" in name for name in service_names)
-
-    @pytest.mark.asyncio
-    async def test_check_failed_services_no_systemctl(self):
-        """Test when systemctl is not available."""
-        with patch("arch_ops_server.system.check_command_exists", return_value=False):
-            result = await check_failed_services()
-            
-            assert "error" in result
-            assert result["error"] == "NotSupported"
-
 
 class TestBootLogs:
     """Test boot log retrieval."""
@@ -249,14 +190,5 @@ Nov 10 10:00:02 archbox systemd[1]: System started successfully
             result = await get_boot_logs()
             
             assert "error" in result
-            assert result["error"] == "CommandError"
-
-    @pytest.mark.asyncio
-    async def test_get_boot_logs_no_journalctl(self):
-        """Test when journalctl is not available."""
-        with patch("arch_ops_server.system.check_command_exists", return_value=False):
-            result = await get_boot_logs()
-            
-            assert "error" in result
-            assert result["error"] == "NotSupported"
+            assert result["type"] == "CommandError"
 

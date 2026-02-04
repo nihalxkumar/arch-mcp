@@ -6,6 +6,7 @@ Provides package info and update checks with hybrid local/remote approach.
 
 import logging
 import re
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 import httpx
 
@@ -1483,7 +1484,6 @@ async def check_database_freshness() -> Dict[str, Any]:
     logger.info("Checking database freshness")
 
     try:
-        from pathlib import Path
         from datetime import datetime, timedelta
 
         sync_dir = Path("/var/lib/pacman/sync")

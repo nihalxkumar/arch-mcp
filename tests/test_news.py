@@ -103,8 +103,8 @@ class TestNewsRetrieval:
 
             result = await get_latest_news()
 
-            assert "error" in result
-            assert result["error"] == "HTTPError"
+        assert "error" in result
+        assert result["type"] == "HTTPError"
 
     @pytest.mark.asyncio
     async def test_get_latest_news_timeout(self):
@@ -116,8 +116,8 @@ class TestNewsRetrieval:
 
             result = await get_latest_news()
 
-            assert "error" in result
-            assert result["error"] == "Timeout"
+        assert "error" in result
+        assert result["type"] == "Timeout"
 
 
 class TestCriticalNews:
@@ -253,7 +253,7 @@ class TestNewsSinceUpdate:
         result = await get_news_since_last_update()
 
         assert "error" in result
-        assert result["error"] == "NotSupported"
+        assert result["type"] == "NotSupported"
 
     @pytest.mark.asyncio
     @patch("arch_ops_server.news.IS_ARCH", True)
@@ -262,6 +262,6 @@ class TestNewsSinceUpdate:
         with patch("pathlib.Path.exists", return_value=False):
             result = await get_news_since_last_update()
 
-            assert "error" in result
-            assert result["error"] == "NotFound"
+        assert "error" in result
+        assert result["type"] == "NotFound"
 
