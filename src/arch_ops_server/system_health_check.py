@@ -8,17 +8,19 @@ import logging
 from typing import Dict, Any
 
 from .utils import IS_ARCH
-from . import (
+from .system import (
     get_system_info,
     check_disk_space,
     check_failed_services,
-    get_pacman_cache_stats,
-    check_updates_dry_run,
-    check_critical_news,
-    list_orphan_packages,
-    check_database_freshness,
-    check_mirrorlist_health
+    get_pacman_cache_stats
 )
+from .pacman import (
+    check_updates_dry_run,
+    list_orphan_packages,
+    check_database_freshness
+)
+from .news import check_critical_news
+from .mirrors import check_mirrorlist_health
 
 logger = logging.getLogger(__name__)
 
