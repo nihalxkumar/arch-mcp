@@ -27,7 +27,7 @@ wheels = [
 
 [[package]]
 name = "arch-ops-server"
-version = "3.3.4"
+version = "3.3.5"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

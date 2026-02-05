@@ -65,6 +65,7 @@ from . import (
     find_when_installed,
     find_failed_transactions,
     get_database_sync_history,
+    query_package_history,
     # Mirrors functions
     list_active_mirrors,
     test_mirror_speed,
@@ -1079,6 +1080,33 @@ async def list_tools() -> list[Tool]:
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
 
+        # Consolidated Transaction History Tool
+        Tool(
+            name="query_package_history",
+            description="[HISTORY] Unified tool for querying package history from pacman logs. Supports four query types: 'all' (recent transactions), 'package' (specific package install/upgrade history), 'failures' (failed transactions), and 'sync' (database sync history). Only works on Arch Linux. Examples: query_type='all', limit=50 → recent transactions; query_type='package', package_name='docker' → when docker was installed; query_type='failures' → find errors; query_type='sync', limit=20 → sync history.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query_type": {
+                        "type": "string",
+                        "enum": ["all", "package", "failures", "sync"],
+                        "description": "Type of query: 'all' (recent transactions), 'package' (package history), 'failures' (failed transactions), or 'sync' (database sync history)"
+                    },
+                    "package_name": {
+                        "type": "string",
+                        "description": "Package name (required for query_type='package')"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default 50)",
+                        "default": 50
+                    }
+                },
+                "required": ["query_type"]
+            },
+            annotations=ToolAnnotations(readOnlyHint=True)
+        ),
+
         # Mirror Management Tools
         Tool(
             name="list_active_mirrors",
@@ -1407,6 +1435,17 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         
         limit = arguments.get("limit", 20)
         result = await get_database_sync_history(limit=limit)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    # Consolidated transaction history tool
+    elif name == "query_package_history":
+        if not IS_ARCH:
+            return [TextContent(type="text", text=create_platform_error_message("query_package_history"))]
+        
+        query_type = arguments.get("query_type")
+        package_name = arguments.get("package_name")
+        limit = arguments.get("limit", 50)
+        result = await query_package_history(query_type=query_type, package_name=package_name, limit=limit)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Mirror management tools
