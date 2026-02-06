@@ -395,3 +395,116 @@ async def check_mirrorlist_health() -> Dict[str, Any]:
             f"Failed to check mirrorlist health: {str(e)}"
         )
 
+
+async def optimize_mirrors(
+    action: str = "status",
+    country: Optional[str] = None,
+    mirror_url: Optional[str] = None,
+    limit: int = 10,
+    auto_test: bool = False
+) -> Dict[str, Any]:
+    """
+    Smart mirror management tool that consolidates 4 mirror operations.
+
+    Args:
+        action: Operation to perform - "status" (list mirrors), "test" (test speed),
+                "suggest" (get recommendations), or "health" (full health check)
+        country: Optional country code for suggestions (e.g., 'US', 'DE')
+        mirror_url: Specific mirror URL to test (action="test" only)
+        limit: Number of mirrors for suggestions (default 10)
+        auto_test: If True, automatically test mirrors after listing (action="status" only)
+
+    Returns:
+        Dict with results based on action:
+        - "status": Current mirror configuration with optional test results
+        - "test": Speed test results for specified or all mirrors
+        - "suggest": Recommended mirrors from archlinux.org
+        - "health": Comprehensive health assessment with issues and recommendations
+
+    Examples:
+        # Check current mirror configuration
+        optimize_mirrors(action="status")
+
+        # Test specific mirror
+        optimize_mirrors(action="test", mirror_url="https://mirror.example.com")
+
+        # Get top 10 fastest mirrors for US
+        optimize_mirrors(action="suggest", country="US", limit=10)
+
+        # Full health check
+        optimize_mirrors(action="health")
+
+        # List mirrors and auto-test them
+        optimize_mirrors(action="status", auto_test=True)
+    """
+    logger.info(f"Optimizing mirrors: action={action}, country={country}, auto_test={auto_test}")
+
+    try:
+        if action == "status":
+            # Get current mirror configuration
+            result = await list_active_mirrors()
+            if "error" in result:
+                return result
+
+            response = {
+                "action": "status",
+                "configuration": result
+            }
+
+            # Optionally run speed tests
+            if auto_test:
+                logger.info("Auto-testing mirror speeds...")
+                test_result = await test_mirror_speed()
+                if "error" not in test_result:
+                    response["speed_tests"] = test_result
+
+            return response
+
+        elif action == "test":
+            # Test mirror speeds
+            return {
+                "action": "test",
+                "results": await test_mirror_speed(mirror_url=mirror_url)
+            }
+
+        elif action == "suggest":
+            # Get mirror suggestions
+            return {
+                "action": "suggest",
+                "recommendations": await suggest_fastest_mirrors(country=country, limit=limit)
+            }
+
+        elif action == "health":
+            # Comprehensive health check
+            health_result = await check_mirrorlist_health()
+
+            if "error" in health_result:
+                return health_result
+
+            # Also get current configuration for context
+            config_result = await list_active_mirrors()
+            if "error" not in config_result:
+                health_result["configuration"] = {
+                    "active_count": config_result.get("active_count", 0),
+                    "commented_count": config_result.get("commented_count", 0),
+                    "active_mirrors": config_result.get("active_mirrors", [])
+                }
+
+            return {
+                "action": "health",
+                "assessment": health_result
+            }
+
+        else:
+            return create_error_response(
+                "InvalidAction",
+                f"Invalid action '{action}'. Must be one of: status, test, suggest, health"
+            )
+
+    except Exception as e:
+        logger.error(f"Mirror optimization failed: {e}")
+        return create_error_response(
+            "OptimizationError",
+            f"Failed to optimize mirrors: {str(e)}"
+        )
+

@@ -62,6 +62,7 @@ from .mirrors import (
     test_mirror_speed,
     suggest_fastest_mirrors,
     check_mirrorlist_health,
+    optimize_mirrors,
 )
 from .config import (
     analyze_pacman_conf,
@@ -172,6 +173,7 @@ __all__ = [
     "test_mirror_speed",
     "suggest_fastest_mirrors",
     "check_mirrorlist_health",
+    "optimize_mirrors",
     # Config
     "analyze_pacman_conf",
     "analyze_makepkg_conf",
