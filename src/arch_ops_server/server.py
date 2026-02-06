@@ -61,21 +61,12 @@ from . import (
     check_critical_news,
     get_news_since_last_update,
     # Logs functions
-    get_transaction_history,
-    find_when_installed,
-    find_failed_transactions,
-    get_database_sync_history,
     query_package_history,
     # Mirrors functions
-    list_active_mirrors,
-    test_mirror_speed,
-    suggest_fastest_mirrors,
-    check_mirrorlist_health,
+    optimize_mirrors,
     # Config functions
     analyze_pacman_conf,
     analyze_makepkg_conf,
-    check_ignored_packages,
-    get_parallel_downloads_setting,
     # System health check
     run_system_health_check,
     # Utils
@@ -1014,72 +1005,6 @@ async def list_tools() -> list[Tool]:
         ),
 
         # Transaction Log Tools
-        Tool(
-            name="get_transaction_history",
-            description="[HISTORY] Get recent package transactions from pacman log. Shows installed, upgraded, and removed packages. Only works on Arch Linux. Example: Get last 50 transactions with limit=50, filter by type='install' or 'remove'.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of transactions to return (default 50)",
-                        "default": 50
-                    },
-                    "transaction_type": {
-                        "type": "string",
-                        "description": "Filter by type: install/remove/upgrade/all (default all)",
-                        "enum": ["all", "install", "remove", "upgrade"],
-                        "default": "all"
-                    }
-                },
-                "required": []
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="find_when_installed",
-            description="[HISTORY] Find when a package was first installed and its upgrade history. Only works on Arch Linux. Use case: Check when 'docker' was installed and what version it was.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "package_name": {
-                        "type": "string",
-                        "description": "Name of the package to search for"
-                    }
-                },
-                "required": ["package_name"]
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="find_failed_transactions",
-            description="[HISTORY] Find failed package transactions in pacman log. Only works on Arch Linux. When to use: After pacman errors, see which transactions failed and why.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="get_database_sync_history",
-            description="[HISTORY] Get database synchronization history. Shows when 'pacman -Sy' was run. Only works on Arch Linux. Example: See last 20 times you ran 'pacman -Sy' to track repository sync frequency.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of sync events to return (default 20)",
-                        "default": 20
-                    }
-                },
-                "required": []
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
         # Consolidated Transaction History Tool
         Tool(
             name="query_package_history",
@@ -1109,58 +1034,36 @@ async def list_tools() -> list[Tool]:
 
         # Mirror Management Tools
         Tool(
-            name="list_active_mirrors",
-            description="[MIRRORS] List currently configured mirrors from mirrorlist. Only works on Arch Linux. Returns: Current mirrors from /etc/pacman.d/mirrorlist with their URLs and countries.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="test_mirror_speed",
-            description="[MIRRORS] Test mirror response time. Can test a specific mirror or all active mirrors. Only works on Arch Linux. Example: Test specific mirror 'https://mirror.example.com' or all active mirrors if no URL provided.",
+            name="optimize_mirrors",
+            description="[MIRRORS] Smart mirror management - consolidates 4 mirror operations. Actions: 'status' (list configured mirrors), 'test' (test mirror speeds), 'suggest' (get optimal mirrors from archlinux.org), 'health' (full health check). Examples: optimize_mirrors(action='status', auto_test=True) lists and tests all mirrors; optimize_mirrors(action='suggest', country='US', limit=5) suggests top 5 US mirrors; optimize_mirrors(action='health') checks for issues and gives recommendations.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "mirror_url": {
+                    "action": {
                         "type": "string",
-                        "description": "Specific mirror URL to test, or omit to test all active mirrors"
-                    }
-                },
-                "required": []
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="suggest_fastest_mirrors",
-            description="[MIRRORS] Suggest optimal mirrors based on official mirror status from archlinux.org. Filters by country if specified. Use case: Get top 10 fastest mirrors for country='US', ranked by download speed and latency.",
-            inputSchema={
-                "type": "object",
-                "properties": {
+                        "enum": ["status", "test", "suggest", "health"],
+                        "description": "Operation to perform: 'status' (list mirrors), 'test' (test speeds), 'suggest' (get recommendations), 'health' (full check)"
+                    },
                     "country": {
                         "type": "string",
-                        "description": "Optional country code to filter mirrors (e.g., 'US', 'DE')"
+                        "description": "Optional country code for suggestions (e.g., 'US', 'DE') - action='suggest' only"
+                    },
+                    "mirror_url": {
+                        "type": "string",
+                        "description": "Specific mirror URL to test - action='test' only"
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Number of mirrors to suggest (default 10)",
+                        "description": "Number of mirrors for suggestions (default 10)",
                         "default": 10
+                    },
+                    "auto_test": {
+                        "type": "boolean",
+                        "description": "If true, test mirrors after listing - action='status' only",
+                        "default": False
                     }
                 },
-                "required": []
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="check_mirrorlist_health",
-            description="[MIRRORS] Verify mirror configuration health. Checks for common issues like no active mirrors, outdated mirrorlist, high latency. Only works on Arch Linux. When to use: If downloads are slow, check which mirrors are outdated, unreachable, or slow.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
+                "required": ["action"]
             },
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
@@ -1168,10 +1071,17 @@ async def list_tools() -> list[Tool]:
         # Configuration Tools
         Tool(
             name="analyze_pacman_conf",
-            description="[CONFIG] Parse and analyze pacman.conf. Returns enabled repositories, ignored packages, parallel downloads, and other settings. Only works on Arch Linux. Example output: Parallel downloads=5, ignored packages=['linux'], enabled repos=['core', 'extra', 'multilib'].",
+            description="[CONFIG] Parse and analyze pacman.conf with optional focus. Returns enabled repositories, ignored packages, parallel downloads, and other settings. Only works on Arch Linux. Examples: focus='full' (default) returns all settings; focus='ignored_packages' returns only ignored packages with warnings for critical ones; focus='parallel_downloads' returns only parallel downloads setting with optimization recommendations.",
             inputSchema={
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "focus": {
+                        "type": "string",
+                        "enum": ["full", "ignored_packages", "parallel_downloads"],
+                        "description": "What to analyze: 'full' (all settings), 'ignored_packages' (only ignored packages), 'parallel_downloads' (only parallel downloads setting)",
+                        "default": "full"
+                    }
+                }
             },
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
@@ -1179,26 +1089,6 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="analyze_makepkg_conf",
             description="[CONFIG] Parse and analyze makepkg.conf. Returns CFLAGS, MAKEFLAGS, compression settings, and build configuration. Only works on Arch Linux. Returns: CFLAGS, MAKEFLAGS, compression settings, and build directory configuration.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="check_ignored_packages",
-            description="[CONFIG] List packages ignored in updates from pacman.conf. Warns if critical system packages are ignored. Only works on Arch Linux. Use case: See which packages are in IgnorePkg/IgnoreGroup to understand why they don't update.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="get_parallel_downloads_setting",
-            description="[CONFIG] Get parallel downloads configuration from pacman.conf and provide recommendations. Only works on Arch Linux. Example: Returns current ParallelDownloads value (default=5) from pacman.conf.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -1401,42 +1291,6 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await get_news_since_last_update()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-    # Transaction log tools
-    elif name == "get_transaction_history":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("get_transaction_history"))]
-        
-        limit = arguments.get("limit", 50)
-        transaction_type = arguments.get("transaction_type", "all")
-        result = await get_transaction_history(limit=limit, transaction_type=transaction_type)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "find_when_installed":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("find_when_installed"))]
-        
-        package_name = arguments.get("package_name")
-        if not package_name:
-            return [TextContent(type="text", text="Error: package_name required")]
-        
-        result = await find_when_installed(package_name)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "find_failed_transactions":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("find_failed_transactions"))]
-        
-        result = await find_failed_transactions()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "get_database_sync_history":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("get_database_sync_history"))]
-        
-        limit = arguments.get("limit", 20)
-        result = await get_database_sync_history(limit=limit)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
     # Consolidated transaction history tool
     elif name == "query_package_history":
         if not IS_ARCH:
@@ -1448,33 +1302,21 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await query_package_history(query_type=query_type, package_name=package_name, limit=limit)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-    # Mirror management tools
-    elif name == "list_active_mirrors":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("list_active_mirrors"))]
-        
-        result = await list_active_mirrors()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "test_mirror_speed":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("test_mirror_speed"))]
-        
-        mirror_url = arguments.get("mirror_url")
-        result = await test_mirror_speed(mirror_url=mirror_url)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "suggest_fastest_mirrors":
+    # Mirror management tool (consolidated)
+    elif name == "optimize_mirrors":
+        action = arguments.get("action")
         country = arguments.get("country")
+        mirror_url = arguments.get("mirror_url")
         limit = arguments.get("limit", 10)
-        result = await suggest_fastest_mirrors(country=country, limit=limit)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "check_mirrorlist_health":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("check_mirrorlist_health"))]
+        auto_test = arguments.get("auto_test", False)
         
-        result = await check_mirrorlist_health()
+        result = await optimize_mirrors(
+            action=action,
+            country=country,
+            mirror_url=mirror_url,
+            limit=limit,
+            auto_test=auto_test
+        )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Configuration tools
@@ -1482,7 +1324,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         if not IS_ARCH:
             return [TextContent(type="text", text=create_platform_error_message("analyze_pacman_conf"))]
         
-        result = await analyze_pacman_conf()
+        focus = arguments.get("focus", "full")
+        result = await analyze_pacman_conf(focus=focus)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "analyze_makepkg_conf":
@@ -1492,20 +1335,6 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await analyze_makepkg_conf()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-    elif name == "check_ignored_packages":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("check_ignored_packages"))]
-        
-        result = await check_ignored_packages()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "get_parallel_downloads_setting":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("get_parallel_downloads_setting"))]
-        
-        result = await get_parallel_downloads_setting()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-    
     elif name == "run_system_health_check":
         if not IS_ARCH:
             return [TextContent(type="text", text=create_platform_error_message("run_system_health_check"))]
@@ -2143,31 +1972,27 @@ Be comprehensive and explain security implications."""
                         type="text",
                         text=f"""Please optimize repository mirrors:
 
-1. **List Current Mirrors**:
-   - Run list_active_mirrors
-   - Show currently configured mirrors
-
-2. **Test Current Mirror Performance**:
-   - Run test_mirror_speed (without mirror_url argument to test all)
-   - Show latency for each mirror
+1. **List and Test Current Mirrors**:
+   - Run optimize_mirrors(action='status', auto_test=True)
+   - Show currently configured mirrors with their speeds
    - Identify slow mirrors (> 500ms)
 
-3. **Suggest Optimal Mirrors**:
-   - Run suggest_fastest_mirrors{f'(country="{country}")' if country else ''}
+2. **Suggest Optimal Mirrors**:
+   - Run optimize_mirrors(action='suggest'{f', country="{country}"' if country else ''}, limit=10)
    - Based on geographic location and current status
    - Show top 10 recommended mirrors
 
-4. **Health Check**:
-   - Run check_mirrorlist_health
+3. **Health Check**:
+   - Run optimize_mirrors(action='health')
    - Identify any configuration issues
    - Check for outdated or unreachable mirrors
 
-5. **Recommendations**:
+4. **Recommendations**:
    - Suggest mirror configuration changes
    - Provide commands to update /etc/pacman.d/mirrorlist
    - Recommend using reflector or manual configuration
 
-6. **Expected Benefits**:
+5. **Expected Benefits**:
    - Estimate download speed improvements
    - Reduced update times
    - Better reliability
@@ -2230,12 +2055,12 @@ Be detailed and provide specific mirror URLs and configuration commands."""
    - Suggest running verify_package_integrity on critical packages
 
 6. **Configuration Health**:
-   - Run analyze_pacman_conf
-   - Run check_ignored_packages
+   - Run analyze_pacman_conf (focus='full') for full config
+   - Run analyze_pacman_conf (focus='ignored_packages') to check for ignored critical packages
    - Warn about critical packages being ignored
 
 7. **Mirror Health**:
-   - Run check_mirrorlist_health
+   - Run optimize_mirrors(action='health')
    - Identify mirror issues
 
 8. **Summary Report**:
