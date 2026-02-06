@@ -92,12 +92,16 @@ def parse_config_file(file_path: str) -> Dict[str, Any]:
     return config
 
 
-async def analyze_pacman_conf() -> Dict[str, Any]:
+async def analyze_pacman_conf(focus: str = "full") -> Dict[str, Any]:
     """
     Parse and analyze pacman.conf.
 
+    Args:
+        focus: What to analyze - "full" (all settings), "ignored_packages" (only ignored),
+               "parallel_downloads" (only parallel downloads setting)
+
     Returns:
-        Dict with parsed pacman configuration
+        Dict with parsed pacman configuration (filtered by focus)
     """
     if not IS_ARCH:
         return create_error_response(
@@ -145,9 +149,10 @@ async def analyze_pacman_conf() -> Dict[str, Any]:
         sig_level = options.get("SigLevel", "")
         local_file_sig_level = options.get("LocalFileSigLevel", "")
 
-        logger.info(f"Parsed pacman.conf: {len(repositories)} repos, {parallel_downloads} parallel downloads")
+        logger.info(f"Parsed pacman.conf: {len(repositories)} repos, {parallel_downloads} parallel downloads, focus={focus}")
 
-        return {
+        # Build full result
+        full_result = {
             "config_path": str(pacman_conf),
             "repositories": repositories,
             "repository_count": len(repositories),
@@ -159,6 +164,42 @@ async def analyze_pacman_conf() -> Dict[str, Any]:
             "all_options": options,
             "raw_config": config
         }
+
+        # Filter result based on focus
+        if focus == "ignored_packages":
+            critical_packages = ["linux", "systemd", "pacman", "glibc"]
+            critical_ignored = [pkg for pkg in ignored_packages if pkg in critical_packages]
+            warnings = []
+            if critical_ignored:
+                warnings.append(f"Critical system packages are ignored: {', '.join(critical_ignored)}")
+            
+            return {
+                "focus": "ignored_packages",
+                "ignored_packages": ignored_packages,
+                "ignored_packages_count": len(ignored_packages),
+                "ignored_groups": ignored_groups,
+                "ignored_groups_count": len(ignored_groups),
+                "critical_ignored": critical_ignored,
+                "warnings": warnings,
+                "has_ignored": len(ignored_packages) > 0 or len(ignored_groups) > 0
+            }
+        
+        elif focus == "parallel_downloads":
+            recommendations = []
+            if parallel_downloads == 1:
+                recommendations.append("Consider increasing ParallelDownloads to 3-5 for faster updates")
+            elif parallel_downloads > 10:
+                recommendations.append("Very high ParallelDownloads may strain mirrors; consider reducing to 5-7")
+            
+            return {
+                "focus": "parallel_downloads",
+                "parallel_downloads": parallel_downloads,
+                "is_default": parallel_downloads == 1,
+                "recommendations": recommendations
+            }
+        
+        else:  # focus == "full" or any other value
+            return full_result
 
     except Exception as e:
         logger.error(f"Failed to analyze pacman.conf: {e}")
