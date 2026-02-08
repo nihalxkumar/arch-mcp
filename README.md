@@ -200,11 +200,25 @@ Claude / Cursor / Any MCP client that supports STDIO transport
 ```json
 {
   "mcpServers": {
-    "arch-ops": {
+    "arch-linux": {
       "command": "uvx",
       "args": ["arch-ops-server"]
     }
   }
+}
+```
+
+Opencode:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "arch-linux": {
+      "type": "local",
+      "command": ["uvx", "arch-ops-server"]
+    },
+  },
 }
 ```
 
