@@ -51,6 +51,7 @@ from . import (
     get_system_info,
     check_disk_space,
     get_pacman_cache_stats,
+    analyze_storage,
     check_failed_services,
     get_boot_logs,
     # News functions
@@ -900,21 +901,18 @@ async def list_tools() -> list[Tool]:
         ),
 
         Tool(
-            name="check_disk_space",
-            description="[MONITORING] Check disk space usage for critical filesystem paths including root, home, var, and pacman cache. Warns when space is low. Works on any system. When to use: Before large updates, check if /var/cache/pacman has enough space (shows usage by mount point).",
+            name="analyze_storage",
+            description="[MONITORING] Unified storage analysis tool. Actions: disk_usage (check disk space for critical paths), cache_stats (analyze pacman package cache). Works on any system for disk_usage, Arch only for cache_stats.",
             inputSchema={
                 "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="get_pacman_cache_stats",
-            description="[MONITORING] Analyze pacman package cache statistics including size, package count, and cache age. Only works on Arch Linux. Example output: Cache size 2.3GB, 450 packages, oldest package from 2023-01-15.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["disk_usage", "cache_stats"],
+                        "description": "Analysis type to perform"
+                    }
+                },
+                "required": ["action"]
             },
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
@@ -1235,15 +1233,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await get_system_info()
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-    elif name == "check_disk_space":
-        result = await check_disk_space()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "get_pacman_cache_stats":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("get_pacman_cache_stats"))]
-
-        result = await get_pacman_cache_stats()
+    elif name == "analyze_storage":
+        action = arguments["action"]
+        result = await analyze_storage(action)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "check_failed_services":

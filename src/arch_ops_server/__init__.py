@@ -43,6 +43,7 @@ from .system import (
     get_system_info,
     check_disk_space,
     get_pacman_cache_stats,
+    analyze_storage,
     check_failed_services,
     get_boot_logs,
 )
@@ -153,6 +154,7 @@ __all__ = [
     "get_system_info",
     "check_disk_space",
     "get_pacman_cache_stats",
+    "analyze_storage",
     "check_failed_services",
     "get_boot_logs",
     "run_system_health_check",

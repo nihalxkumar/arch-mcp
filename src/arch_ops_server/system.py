@@ -305,3 +305,24 @@ async def get_boot_logs(lines: int = 100) -> Dict[str, Any]:
             "LogRetrievalError",
             f"Failed to retrieve boot logs: {str(e)}"
         )
+
+
+async def analyze_storage(action: str) -> Dict[str, Any]:
+    """
+    Unified storage analysis tool.
+    
+    Args:
+        action: "disk_usage" or "cache_stats"
+    
+    Returns:
+        Analysis results based on action
+    """
+    if action == "disk_usage":
+        return await check_disk_space()
+    elif action == "cache_stats":
+        return await get_pacman_cache_stats()
+    else:
+        return create_error_response(
+            "InvalidAction",
+            f"Unknown action: {action}. Use 'disk_usage' or 'cache_stats'"
+        )

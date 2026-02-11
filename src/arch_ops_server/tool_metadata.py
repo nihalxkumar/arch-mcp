@@ -189,7 +189,7 @@ TOOL_METADATA = {
      ),
 
     # ========================================================================
-    # System Monitoring (6 tools)
+    # System Monitoring (5 tools)
     # ========================================================================
     "get_system_info": ToolMetadata(
         name="get_system_info",
@@ -197,25 +197,16 @@ TOOL_METADATA = {
         platform="any",
         permission="read",
         workflow="diagnose",
-        related_tools=["check_disk_space", "check_failed_services"],
+        related_tools=["analyze_storage", "check_failed_services"],
         prerequisite_tools=[]
     ),
-    "check_disk_space": ToolMetadata(
-        name="check_disk_space",
+    "analyze_storage": ToolMetadata(
+        name="analyze_storage",
         category="monitoring",
         platform="any",
         permission="read",
         workflow="diagnose",
-        related_tools=["get_pacman_cache_stats", "manage_orphans"],
-        prerequisite_tools=[]
-    ),
-    "get_pacman_cache_stats": ToolMetadata(
-        name="get_pacman_cache_stats",
-        category="monitoring",
-        platform="arch",
-        permission="read",
-        workflow="diagnose",
-        related_tools=["check_disk_space"],
+        related_tools=["check_failed_services"],
         prerequisite_tools=[]
     ),
     "check_failed_services": ToolMetadata(
@@ -244,9 +235,8 @@ TOOL_METADATA = {
         workflow="diagnose",
         related_tools=[
             "get_system_info",
-            "check_disk_space",
+            "analyze_storage",
             "check_failed_services",
-            "get_pacman_cache_stats",
             "check_updates_dry_run",
             "check_critical_news",
             "manage_orphans",
