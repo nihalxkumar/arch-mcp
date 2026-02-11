@@ -156,7 +156,7 @@ TOOL_METADATA = {
     ),
 
     # ========================================================================
-    # File Organization (4 tools)
+    # File Organization (3 tools)
     # ========================================================================
     "query_file_ownership": ToolMetadata(
         name="query_file_ownership",
@@ -164,26 +164,17 @@ TOOL_METADATA = {
         platform="arch",
         permission="read",
         workflow="debug",
-        related_tools=["verify_package_integrity", "list_package_groups"],
+        related_tools=["verify_package_integrity", "manage_groups"],
         prerequisite_tools=[]
     ),
-    "list_package_groups": ToolMetadata(
-        name="list_package_groups",
+    "manage_groups": ToolMetadata(
+        name="manage_groups",
         category="organization",
         platform="arch",
         permission="read",
         workflow="explore",
-        related_tools=["list_group_packages"],
+        related_tools=["query_file_ownership"],
         prerequisite_tools=[]
-    ),
-    "list_group_packages": ToolMetadata(
-        name="list_group_packages",
-        category="organization",
-        platform="arch",
-        permission="read",
-        workflow="explore",
-        related_tools=["list_package_groups"],
-        prerequisite_tools=["list_package_groups"]
     ),
 
     # ========================================================================

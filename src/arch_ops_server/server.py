@@ -46,8 +46,6 @@ from . import (
     manage_orphans,
     query_file_ownership,
     verify_package_integrity,
-    list_package_groups,
-    list_group_packages,
     manage_install_reason,
     check_database_freshness,
     # System functions
@@ -73,6 +71,8 @@ from . import (
     IS_ARCH,
     run_command,
 )
+
+from .groups import manage_groups
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -474,7 +474,7 @@ async def read_resource(uri: str) -> str:
 
         elif resource_path == "groups":
             # Get all package groups
-            result = await list_package_groups()
+            result = await manage_groups(action="list_groups")
             return json.dumps(result, indent=2)
 
         elif resource_path.startswith("group/"):
@@ -482,7 +482,7 @@ async def read_resource(uri: str) -> str:
             group_name = resource_path.split('/', 1)[1]
             if not group_name:
                 raise ValueError("Group name required (e.g., pacman://group/base-devel)")
-            result = await list_group_packages(group_name)
+            result = await manage_groups(action="list_packages_in_group", group_name=group_name)
             return json.dumps(result, indent=2)
 
         elif resource_path.startswith("log/"):
@@ -850,27 +850,22 @@ async def list_tools() -> list[Tool]:
 
         # Package Groups
         Tool(
-            name="list_package_groups",
-            description="[ORGANIZATION] List all available package groups (e.g., base, base-devel, gnome). Only works on Arch Linux. Example: Returns groups like 'base', 'base-devel', 'gnome', 'kde-applications'.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="list_group_packages",
-            description="[ORGANIZATION] List all packages in a specific group. Only works on Arch Linux. Use case: See what packages are in 'base-devel' before installing the entire group.",
+            name="manage_groups",
+            description="[ORGANIZATION] Unified group management tool. Actions: list_groups (all groups), list_packages_in_group (packages in specific group). Examples: manage_groups(action='list_groups'), manage_groups(action='list_packages_in_group', group_name='base-devel')",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list_groups", "list_packages_in_group"],
+                        "description": "Operation to perform"
+                    },
                     "group_name": {
                         "type": "string",
-                        "description": "Name of the package group (e.g., 'base-devel', 'gnome')"
+                        "description": "Group name (required for list_packages_in_group)"
                     }
                 },
-                "required": ["group_name"]
+                "required": ["action"]
             },
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
@@ -1222,19 +1217,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Package Groups
-    elif name == "list_package_groups":
+    elif name == "manage_groups":
         if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("list_package_groups"))]
-
-        result = await list_package_groups()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "list_group_packages":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("list_group_packages"))]
-
-        group_name = arguments["group_name"]
-        result = await list_group_packages(group_name)
+            return [TextContent(type="text", text=create_platform_error_message("manage_groups"))]
+        
+        action = arguments["action"]
+        group_name = arguments.get("group_name", None)
+        result = await manage_groups(action, group_name)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Install Reason Management
