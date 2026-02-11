@@ -52,20 +52,19 @@ TOOL_METADATA = {
         related_tools=["search_aur", "get_official_package_info"],
         prerequisite_tools=[]
     ),
-    "search_aur": ToolMetadata(
-        name="search_aur",
-        category="discovery",
-        platform="any",
-        permission="read",
-        workflow="research",
-        related_tools=[
-            "get_official_package_info",
-            "analyze_package_metadata_risk",
-            "analyze_pkgbuild_safety",
-            "install_package_secure"
-        ],
-        prerequisite_tools=[]
-    ),
+     "search_aur": ToolMetadata(
+         name="search_aur",
+         category="discovery",
+         platform="any",
+         permission="read",
+         workflow="research",
+         related_tools=[
+             "get_official_package_info",
+             "audit_package_security",
+             "install_package_secure"
+         ],
+         prerequisite_tools=[]
+     ),
     "get_official_package_info": ToolMetadata(
         name="get_official_package_info",
         category="discovery",
@@ -115,23 +114,22 @@ TOOL_METADATA = {
         related_tools=["check_critical_news", "check_disk_space"],
         prerequisite_tools=[]
     ),
-    "install_package_secure": ToolMetadata(
-        name="install_package_secure",
-        category="lifecycle",
-        platform="arch",
-        permission="write",
-        workflow="installation",
-        related_tools=[
-            "check_updates_dry_run",
-            "verify_package_integrity",
-            "query_package_history"
-        ],
-        prerequisite_tools=[
-            "get_official_package_info",
-            "analyze_pkgbuild_safety",
-            "analyze_package_metadata_risk"
-        ]
-    ),
+     "install_package_secure": ToolMetadata(
+         name="install_package_secure",
+         category="lifecycle",
+         platform="arch",
+         permission="write",
+         workflow="installation",
+         related_tools=[
+             "check_updates_dry_run",
+             "verify_package_integrity",
+             "query_package_history"
+         ],
+         prerequisite_tools=[
+             "get_official_package_info",
+             "audit_package_security"
+         ]
+     ),
 
     # ========================================================================
     # Package Maintenance (2 tools)
@@ -177,27 +175,18 @@ TOOL_METADATA = {
         prerequisite_tools=[]
     ),
 
-    # ========================================================================
-    # Security Analysis (2 tools)
-    # ========================================================================
-    "analyze_pkgbuild_safety": ToolMetadata(
-        name="analyze_pkgbuild_safety",
-        category="security",
-        platform="any",
-        permission="read",
-        workflow="audit",
-        related_tools=["analyze_package_metadata_risk", "install_package_secure"],
-        prerequisite_tools=[]
-    ),
-    "analyze_package_metadata_risk": ToolMetadata(
-        name="analyze_package_metadata_risk",
-        category="security",
-        platform="any",
-        permission="read",
-        workflow="audit",
-        related_tools=["analyze_pkgbuild_safety", "install_package_secure"],
-        prerequisite_tools=["search_aur"]
-    ),
+     # ========================================================================
+     # Security Analysis (1 tool)
+     # ========================================================================
+     "audit_package_security": ToolMetadata(
+         name="audit_package_security",
+         category="security",
+         platform="any",
+         permission="read",
+         workflow="audit",
+         related_tools=["search_aur", "install_package_secure"],
+         prerequisite_tools=[]
+     ),
 
     # ========================================================================
     # System Monitoring (6 tools)

@@ -5,7 +5,7 @@ Provides search, package info, and PKGBUILD retrieval via AUR RPC v5.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Literal
 import httpx
 from datetime import datetime
 
@@ -1178,13 +1178,82 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
         "warnings": warnings,
         "info": info,
         "risk_score": risk_score,
-        "suspicious_domains": list(set(suspicious_domains)),
-        "recommendation": recommendation,
-        "summary": {
-            "total_red_flags": len(red_flags),
-            "total_warnings": len(warnings),
-            "total_info": len(info),
-            "lines_analyzed": len(lines)
-        }
-    }
+         "suspicious_domains": list(set(suspicious_domains)),
+         "recommendation": recommendation,
+         "summary": {
+             "total_red_flags": len(red_flags),
+             "total_warnings": len(warnings),
+             "total_info": len(info),
+             "lines_analyzed": len(lines)
+         }
+     }
+
+
+async def audit_package_security(
+    action: Literal["pkgbuild_analysis", "metadata_risk"],
+    pkgbuild_content: Optional[str] = None,
+    package_name: Optional[str] = None,
+    package_info: Optional[dict] = None
+) -> dict:
+    """
+    Unified security audit tool for AUR packages.
+    
+    Args:
+        action: Type of security audit
+        pkgbuild_content: PKGBUILD content (for pkgbuild_analysis)
+        package_name: Package name (for metadata_risk)
+        package_info: Pre-fetched package metadata (optional, for metadata_risk)
+    
+    Returns:
+        Security analysis results
+    """
+    if action == "pkgbuild_analysis":
+        if not pkgbuild_content:
+            return create_error_response(
+                "pkgbuild_content is required for pkgbuild_analysis",
+                error_type="validation_error"
+            )
+        result = analyze_pkgbuild_safety(pkgbuild_content)
+        result["action"] = "pkgbuild_analysis"
+        return result
+    
+    elif action == "metadata_risk":
+        if not package_name and not package_info:
+            return create_error_response(
+                "Either package_name or package_info is required for metadata_risk",
+                error_type="validation_error"
+            )
+        
+        if package_info:
+            result = analyze_package_metadata_risk(package_info)
+        else:
+            # Fetch package info first
+            search_result = await search_aur(package_name, limit=1)
+            if "error" in search_result or not search_result.get("results"):
+                return create_error_response(
+                    f"Could not find package '{package_name}' in AUR",
+                    error_type="not_found"
+                )
+            result = analyze_package_metadata_risk(search_result["results"][0])
+        
+        result["action"] = "metadata_risk"
+        return add_aur_warning(result)
+    
+    else:
+        return create_error_response(
+            f"Unknown action: {action}",
+            error_type="validation_error"
+        )
+
+
+__all__ = [
+    "search_aur",
+    "get_aur_info",
+    "get_aur_file",
+    "get_pkgbuild",
+    "install_package_secure",
+    "analyze_pkgbuild_safety",
+    "analyze_package_metadata_risk",
+    "audit_package_security",
+]
 

@@ -16,6 +16,7 @@ from .aur import (
     get_aur_file,
     analyze_pkgbuild_safety,
     analyze_package_metadata_risk,
+    audit_package_security,
     install_package_secure,
 )
 from .pacman import (
@@ -32,8 +33,6 @@ from .pacman import (
     search_package_files,
     query_file_ownership,
     verify_package_integrity,
-    list_package_groups,
-    list_group_packages,
     list_explicit_packages,
     mark_as_explicit,
     mark_as_dependency,
@@ -129,6 +128,7 @@ __all__ = [
     "get_aur_file",
     "analyze_pkgbuild_safety",
     "analyze_package_metadata_risk",
+    "audit_package_security",
     "install_package_secure",
     # Pacman
     "get_official_package_info",
@@ -144,8 +144,6 @@ __all__ = [
     "search_package_files",
     "query_file_ownership",
     "verify_package_integrity",
-    "list_package_groups",
-    "list_group_packages",
     "list_explicit_packages",
     "mark_as_explicit",
     "mark_as_dependency",

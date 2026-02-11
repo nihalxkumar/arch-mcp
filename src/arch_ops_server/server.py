@@ -32,8 +32,7 @@ from . import (
     search_aur,
     get_aur_info,
     get_pkgbuild,
-    analyze_pkgbuild_safety,
-    analyze_package_metadata_risk,
+    audit_package_security,
     install_package_secure,
     # Pacman functions
     get_official_package_info,
@@ -709,37 +708,34 @@ async def list_tools() -> list[Tool]:
             annotations=ToolAnnotations(destructiveHint=True)
         ),
         
-        Tool(
-            name="analyze_pkgbuild_safety",
-            description="[SECURITY] Analyze PKGBUILD content for security issues and dangerous patterns. Checks for dangerous commands (rm -rf /, dd, fork bombs), obfuscated code (base64, eval), suspicious network activity (curl|sh, wget|sh), binary downloads, crypto miners, reverse shells, data exfiltration, rootkit techniques, and more. Returns risk score (0-100) and detailed findings. Use this tool to manually audit AUR packages before installation. Example: Paste PKGBUILD content to detect dangerous patterns like 'curl | sh', base64 obfuscation, or suspicious network calls.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "pkgbuild_content": {
-                        "type": "string",
-                        "description": "Raw PKGBUILD content to analyze"
-                    }
-                },
-                "required": ["pkgbuild_content"]
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-        
-        Tool(
-            name="analyze_package_metadata_risk",
-            description="[SECURITY] Analyze AUR package metadata for trustworthiness and security indicators. Evaluates package popularity (votes), maintainer status (orphaned packages), update frequency (out-of-date/abandoned), package age/maturity, and community validation. Returns trust score (0-100) with risk factors and trust indicators. Use this alongside PKGBUILD analysis for comprehensive security assessment. Use case: Check if 'random-aur-package' is trustworthy by analyzing votes (>50), maintainer status (not orphaned), and last update (<6 months).",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "package_info": {
-                        "type": "object",
-                        "description": "Package metadata from AUR (from search_aur or get_aur_info results)"
-                    }
-                },
-                "required": ["package_info"]
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
+         Tool(
+             name="audit_package_security",
+             description="[SECURITY] Comprehensive security audit for AUR packages. Actions: pkgbuild_analysis (scan PKGBUILD for 50+ red flags), metadata_risk (evaluate trustworthiness via votes/maintainer/age). Examples: audit_package_security(action='pkgbuild_analysis', pkgbuild_content='...'), audit_package_security(action='metadata_risk', package_name='yay'). ⚠️ Always audit AUR packages before installing.",
+             inputSchema={
+                 "type": "object",
+                 "properties": {
+                     "action": {
+                         "type": "string",
+                         "enum": ["pkgbuild_analysis", "metadata_risk"],
+                         "description": "Type of security audit"
+                     },
+                     "pkgbuild_content": {
+                         "type": "string",
+                         "description": "PKGBUILD content for analysis"
+                     },
+                     "package_name": {
+                         "type": "string",
+                         "description": "Package name for metadata analysis"
+                     },
+                     "package_info": {
+                         "type": "object",
+                         "description": "Pre-fetched package metadata"
+                     }
+                 },
+                 "required": ["action"]
+             },
+             annotations=ToolAnnotations(readOnlyHint=True)
+         ),
 
         # Package Removal
         Tool(
@@ -1163,14 +1159,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await install_package_secure(package_name)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
-    elif name == "analyze_pkgbuild_safety":
-        pkgbuild_content = arguments["pkgbuild_content"]
-        result = analyze_pkgbuild_safety(pkgbuild_content)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-    
-    elif name == "analyze_package_metadata_risk":
-        package_info = arguments["package_info"]
-        result = analyze_package_metadata_risk(package_info)
+    elif name == "audit_package_security":
+        action = arguments["action"]
+        pkgbuild_content = arguments.get("pkgbuild_content", None)
+        package_name = arguments.get("package_name", None)
+        package_info = arguments.get("package_info", None)
+        result = await audit_package_security(action, pkgbuild_content, package_name, package_info)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Package Removal Tools
