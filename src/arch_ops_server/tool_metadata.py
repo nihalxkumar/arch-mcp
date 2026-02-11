@@ -38,7 +38,7 @@ class ToolMetadata:
     prerequisite_tools: List[str] = field(default_factory=list)
 
 
-# Complete tool metadata definitions for all 41 tools
+# Complete tool metadata definitions for 28 registered tools
 TOOL_METADATA = {
     # ========================================================================
     # Discovery & Information (6 tools)
@@ -104,7 +104,7 @@ TOOL_METADATA = {
     ),
 
     # ========================================================================
-    # Package Lifecycle (4 tools)
+    # Package Lifecycle (2 tools)
     # ========================================================================
     "check_updates_dry_run": ToolMetadata(
         name="check_updates_dry_run",
@@ -124,7 +124,7 @@ TOOL_METADATA = {
         related_tools=[
             "check_updates_dry_run",
             "verify_package_integrity",
-            "get_transaction_history"
+            "query_package_history"
         ],
         prerequisite_tools=[
             "get_official_package_info",
@@ -132,80 +132,17 @@ TOOL_METADATA = {
             "analyze_package_metadata_risk"
         ]
     ),
-    "remove_package": ToolMetadata(
-        name="remove_package",
-        category="lifecycle",
-        platform="arch",
-        permission="write",
-        workflow="removal",
-        related_tools=["remove_packages_batch", "list_orphan_packages"],
-        prerequisite_tools=[]
-    ),
-    "remove_packages_batch": ToolMetadata(
-        name="remove_packages_batch",
-        category="lifecycle",
-        platform="arch",
-        permission="write",
-        workflow="removal",
-        related_tools=["remove_package", "remove_orphans"],
-        prerequisite_tools=[]
-    ),
 
     # ========================================================================
-    # Package Maintenance (7 tools)
+    # Package Maintenance (2 tools)
     # ========================================================================
-    "list_orphan_packages": ToolMetadata(
-        name="list_orphan_packages",
-        category="maintenance",
-        platform="arch",
-        permission="read",
-        workflow="cleanup",
-        related_tools=["remove_orphans", "mark_as_explicit"],
-        prerequisite_tools=[]
-    ),
-    "remove_orphans": ToolMetadata(
-        name="remove_orphans",
-        category="maintenance",
-        platform="arch",
-        permission="write",
-        workflow="cleanup",
-        related_tools=["list_orphan_packages"],
-        prerequisite_tools=["list_orphan_packages"]
-    ),
     "verify_package_integrity": ToolMetadata(
         name="verify_package_integrity",
         category="maintenance",
         platform="arch",
         permission="read",
         workflow="verify",
-        related_tools=["get_transaction_history", "find_package_owner"],
-        prerequisite_tools=[]
-    ),
-    "list_explicit_packages": ToolMetadata(
-        name="list_explicit_packages",
-        category="maintenance",
-        platform="arch",
-        permission="read",
-        workflow="audit",
-        related_tools=["mark_as_explicit", "mark_as_dependency"],
-        prerequisite_tools=[]
-    ),
-    "mark_as_explicit": ToolMetadata(
-        name="mark_as_explicit",
-        category="maintenance",
-        platform="arch",
-        permission="write",
-        workflow="organize",
-        related_tools=["list_explicit_packages", "list_orphan_packages"],
-        prerequisite_tools=[]
-    ),
-    "mark_as_dependency": ToolMetadata(
-        name="mark_as_dependency",
-        category="maintenance",
-        platform="arch",
-        permission="write",
-        workflow="organize",
-        related_tools=["list_explicit_packages", "list_orphan_packages"],
+        related_tools=["query_package_history", "query_file_ownership"],
         prerequisite_tools=[]
     ),
     "check_database_freshness": ToolMetadata(
@@ -214,38 +151,20 @@ TOOL_METADATA = {
         platform="arch",
         permission="read",
         workflow="verify",
-        related_tools=["get_database_sync_history"],
+        related_tools=["query_package_history"],
         prerequisite_tools=[]
     ),
 
     # ========================================================================
-    # File Organization (5 tools)
+    # File Organization (4 tools)
     # ========================================================================
-    "find_package_owner": ToolMetadata(
-        name="find_package_owner",
+    "query_file_ownership": ToolMetadata(
+        name="query_file_ownership",
         category="organization",
         platform="arch",
         permission="read",
         workflow="debug",
-        related_tools=["list_package_files", "verify_package_integrity"],
-        prerequisite_tools=[]
-    ),
-    "list_package_files": ToolMetadata(
-        name="list_package_files",
-        category="organization",
-        platform="arch",
-        permission="read",
-        workflow="explore",
-        related_tools=["find_package_owner", "search_package_files"],
-        prerequisite_tools=[]
-    ),
-    "search_package_files": ToolMetadata(
-        name="search_package_files",
-        category="organization",
-        platform="arch",
-        permission="read",
-        workflow="search",
-        related_tools=["list_package_files", "find_package_owner"],
+        related_tools=["verify_package_integrity", "list_package_groups"],
         prerequisite_tools=[]
     ),
     "list_package_groups": ToolMetadata(
@@ -290,7 +209,7 @@ TOOL_METADATA = {
     ),
 
     # ========================================================================
-    # System Monitoring (5 tools)
+    # System Monitoring (6 tools)
     # ========================================================================
     "get_system_info": ToolMetadata(
         name="get_system_info",
@@ -307,7 +226,7 @@ TOOL_METADATA = {
         platform="any",
         permission="read",
         workflow="diagnose",
-        related_tools=["get_pacman_cache_stats", "list_orphan_packages"],
+        related_tools=["get_pacman_cache_stats", "manage_orphans"],
         prerequisite_tools=[]
     ),
     "get_pacman_cache_stats": ToolMetadata(
@@ -337,126 +256,6 @@ TOOL_METADATA = {
         related_tools=["check_failed_services"],
         prerequisite_tools=[]
     ),
-
-    # ========================================================================
-    # Transaction History (4 tools)
-    # ========================================================================
-    "get_transaction_history": ToolMetadata(
-        name="get_transaction_history",
-        category="history",
-        platform="arch",
-        permission="read",
-        workflow="audit",
-        related_tools=["find_when_installed", "find_failed_transactions"],
-        prerequisite_tools=[]
-    ),
-    "find_when_installed": ToolMetadata(
-        name="find_when_installed",
-        category="history",
-        platform="arch",
-        permission="read",
-        workflow="audit",
-        related_tools=["get_transaction_history"],
-        prerequisite_tools=[]
-    ),
-    "find_failed_transactions": ToolMetadata(
-        name="find_failed_transactions",
-        category="history",
-        platform="arch",
-        permission="read",
-        workflow="debug",
-        related_tools=["get_transaction_history"],
-        prerequisite_tools=[]
-    ),
-    "get_database_sync_history": ToolMetadata(
-        name="get_database_sync_history",
-        category="history",
-        platform="arch",
-        permission="read",
-        workflow="audit",
-        related_tools=["check_database_freshness"],
-        prerequisite_tools=[]
-    ),
-
-    # ========================================================================
-    # Mirror Management (4 tools)
-    # ========================================================================
-    "list_active_mirrors": ToolMetadata(
-        name="list_active_mirrors",
-        category="mirrors",
-        platform="arch",
-        permission="read",
-        workflow="optimize",
-        related_tools=["test_mirror_speed", "check_mirrorlist_health"],
-        prerequisite_tools=[]
-    ),
-    "test_mirror_speed": ToolMetadata(
-        name="test_mirror_speed",
-        category="mirrors",
-        platform="arch",
-        permission="read",
-        workflow="optimize",
-        related_tools=["suggest_fastest_mirrors", "list_active_mirrors"],
-        prerequisite_tools=["list_active_mirrors"]
-    ),
-    "suggest_fastest_mirrors": ToolMetadata(
-        name="suggest_fastest_mirrors",
-        category="mirrors",
-        platform="any",
-        permission="read",
-        workflow="optimize",
-        related_tools=["test_mirror_speed"],
-        prerequisite_tools=[]
-    ),
-    "check_mirrorlist_health": ToolMetadata(
-        name="check_mirrorlist_health",
-        category="mirrors",
-        platform="arch",
-        permission="read",
-        workflow="verify",
-        related_tools=["list_active_mirrors", "suggest_fastest_mirrors"],
-        prerequisite_tools=[]
-    ),
-
-    # ========================================================================
-    # Configuration Management (4 tools)
-    # ========================================================================
-    "analyze_pacman_conf": ToolMetadata(
-        name="analyze_pacman_conf",
-        category="config",
-        platform="arch",
-        permission="read",
-        workflow="explore",
-        related_tools=["check_ignored_packages", "get_parallel_downloads_setting"],
-        prerequisite_tools=[]
-    ),
-    "analyze_makepkg_conf": ToolMetadata(
-        name="analyze_makepkg_conf",
-        category="config",
-        platform="arch",
-        permission="read",
-        workflow="explore",
-        related_tools=["analyze_pacman_conf"],
-        prerequisite_tools=[]
-    ),
-    "check_ignored_packages": ToolMetadata(
-        name="check_ignored_packages",
-        category="config",
-        platform="arch",
-        permission="read",
-        workflow="verify",
-        related_tools=["analyze_pacman_conf"],
-        prerequisite_tools=[]
-    ),
-    "get_parallel_downloads_setting": ToolMetadata(
-        name="get_parallel_downloads_setting",
-        category="config",
-        platform="arch",
-        permission="read",
-        workflow="explore",
-        related_tools=["analyze_pacman_conf"],
-        prerequisite_tools=[]
-    ),
     "run_system_health_check": ToolMetadata(
         name="run_system_health_check",
         category="monitoring",
@@ -470,10 +269,85 @@ TOOL_METADATA = {
             "get_pacman_cache_stats",
             "check_updates_dry_run",
             "check_critical_news",
-            "list_orphan_packages",
+            "manage_orphans",
             "check_database_freshness",
-            "check_mirrorlist_health"
+            "optimize_mirrors"
         ],
+        prerequisite_tools=[]
+    ),
+
+    # ========================================================================
+    # Package Removal & Maintenance (2 unified tools)
+    # ========================================================================
+    "remove_packages": ToolMetadata(
+        name="remove_packages",
+        category="lifecycle",
+        platform="arch",
+        permission="write",
+        workflow="removal",
+        related_tools=["manage_orphans", "verify_package_integrity"],
+        prerequisite_tools=[]
+    ),
+    "manage_orphans": ToolMetadata(
+        name="manage_orphans",
+        category="maintenance",
+        platform="arch",
+        permission="write",
+        workflow="cleanup",
+        related_tools=["remove_packages", "manage_install_reason"],
+        prerequisite_tools=[]
+    ),
+    "query_package_history": ToolMetadata(
+        name="query_package_history",
+        category="history",
+        platform="arch",
+        permission="read",
+        workflow="audit",
+        related_tools=["verify_package_integrity", "check_database_freshness"],
+        prerequisite_tools=[]
+    ),
+    "manage_install_reason": ToolMetadata(
+        name="manage_install_reason",
+        category="maintenance",
+        platform="arch",
+        permission="write",
+        workflow="organize",
+        related_tools=["manage_orphans", "query_package_history"],
+        prerequisite_tools=[]
+    ),
+
+    # ========================================================================
+    # Mirror Management (1 unified tool)
+    # ========================================================================
+    "optimize_mirrors": ToolMetadata(
+        name="optimize_mirrors",
+        category="mirrors",
+        platform="arch",
+        permission="read",
+        workflow="optimize",
+        related_tools=["analyze_pacman_conf", "check_disk_space"],
+        prerequisite_tools=[]
+    ),
+
+    # ========================================================================
+    # Configuration Management (2 tools)
+    # ========================================================================
+    "analyze_pacman_conf": ToolMetadata(
+        name="analyze_pacman_conf",
+        category="config",
+        platform="arch",
+        permission="read",
+        workflow="explore",
+        related_tools=["analyze_makepkg_conf", "optimize_mirrors"],
+        prerequisite_tools=[]
+    ),
+    "analyze_makepkg_conf": ToolMetadata(
+        name="analyze_makepkg_conf",
+        category="config",
+        platform="arch",
+        permission="read",
+        workflow="explore",
+        related_tools=["analyze_pacman_conf"],
         prerequisite_tools=[]
     ),
 }
