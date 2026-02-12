@@ -59,6 +59,7 @@ from . import (
     get_latest_news,
     check_critical_news,
     get_news_since_last_update,
+    fetch_news,
     # Logs functions
     query_package_history,
     # Mirrors functions
@@ -942,49 +943,27 @@ async def list_tools() -> list[Tool]:
 
         # News Tools
         Tool(
-            name="get_latest_news",
-            description="[DISCOVERY] Fetch recent Arch Linux news from RSS feed. Returns title, date, summary, and link for each news item. When to use: Before system updates, check archlinux.org news for manual interventions required.",
+            name="fetch_news",
+            description="[DISCOVERY] Unified news fetching from Arch Linux. Actions: latest (get recent news), critical (find news requiring manual intervention), since_update (news since last system update). Works on any system for latest/critical, Arch only for since_update.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["latest", "critical", "since_update"],
+                        "description": "Type of news query"
+                    },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of news items to return (default 10)",
+                        "description": "Maximum news items (for latest/critical). Default: 10",
                         "default": 10
                     },
                     "since_date": {
                         "type": "string",
-                        "description": "Optional date in ISO format (YYYY-MM-DD) to filter news"
+                        "description": "ISO date to filter from (for latest action)"
                     }
                 },
-                "required": []
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="check_critical_news",
-            description="[DISCOVERY] Check for critical Arch Linux news requiring manual intervention. Scans recent news for keywords: 'manual intervention', 'action required', 'breaking change', etc. Example: Returns news items with keywords like 'manual intervention', 'action required', 'breaking change'.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Number of recent news items to check (default 20)",
-                        "default": 20
-                    }
-                },
-                "required": []
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="get_news_since_last_update",
-            description="[DISCOVERY] Get news posted since last pacman update. Parses /var/log/pacman.log for last update timestamp. Only works on Arch Linux. Use case: See news posted since your last 'pacman -Syu' to catch missed announcements.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
+                "required": ["action"]
             },
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
@@ -1241,22 +1220,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # News tools
-    elif name == "get_latest_news":
+    elif name == "fetch_news":
+        action = arguments["action"]
         limit = arguments.get("limit", 10)
-        since_date = arguments.get("since_date")
-        result = await get_latest_news(limit=limit, since_date=since_date)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "check_critical_news":
-        limit = arguments.get("limit", 20)
-        result = await check_critical_news(limit=limit)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "get_news_since_last_update":
-        if not IS_ARCH:
-            return [TextContent(type="text", text=create_platform_error_message("get_news_since_last_update"))]
-        
-        result = await get_news_since_last_update()
+        since_date = arguments.get("since_date", None)
+        result = await fetch_news(action, limit, since_date)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Consolidated transaction history tool

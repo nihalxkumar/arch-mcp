@@ -286,3 +286,40 @@ async def get_news_since_last_update() -> Dict[str, Any]:
             f"Failed to get news since last update: {str(e)}"
         )
 
+
+async def fetch_news(
+    action: str,
+    limit: int = 10,
+    since_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Unified news fetching tool.
+    
+    Args:
+        action: "latest", "critical", or "since_update"
+        limit: Maximum number of news items
+        since_date: ISO date string for filtering (for latest action)
+    
+    Returns:
+        News results based on action
+    """
+    if action == "latest":
+        return await get_latest_news(limit=limit, since_date=since_date)
+    elif action == "critical":
+        return await check_critical_news(limit=limit)
+    elif action == "since_update":
+        return await get_news_since_last_update()
+    else:
+        return create_error_response(
+            "InvalidAction",
+            f"Unknown action: {action}. Use 'latest', 'critical', or 'since_update'"
+        )
+
+
+__all__ = [
+    "get_latest_news",
+    "check_critical_news",
+    "get_news_since_last_update",
+    "fetch_news",
+]
+

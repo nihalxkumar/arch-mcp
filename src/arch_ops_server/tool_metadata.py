@@ -40,67 +40,49 @@ class ToolMetadata:
 
 # Complete tool metadata definitions for 28 registered tools
 TOOL_METADATA = {
-    # ========================================================================
-    # Discovery & Information (6 tools)
-    # ========================================================================
-    "search_archwiki": ToolMetadata(
-        name="search_archwiki",
-        category="discovery",
-        platform="any",
-        permission="read",
-        workflow="research",
-        related_tools=["search_aur", "get_official_package_info"],
-        prerequisite_tools=[]
-    ),
-     "search_aur": ToolMetadata(
-         name="search_aur",
+     # ========================================================================
+     # Discovery & Information (4 tools)
+     # ========================================================================
+     "search_archwiki": ToolMetadata(
+         name="search_archwiki",
          category="discovery",
          platform="any",
          permission="read",
          workflow="research",
-         related_tools=[
-             "get_official_package_info",
-             "audit_package_security",
-             "install_package_secure"
-         ],
+         related_tools=["search_aur", "get_official_package_info"],
          prerequisite_tools=[]
      ),
-    "get_official_package_info": ToolMetadata(
-        name="get_official_package_info",
-        category="discovery",
-        platform="any",
-        permission="read",
-        workflow="research",
-        related_tools=["search_aur", "install_package_secure"],
-        prerequisite_tools=[]
-    ),
-    "get_latest_news": ToolMetadata(
-        name="get_latest_news",
-        category="discovery",
-        platform="any",
-        permission="read",
-        workflow="safety",
-        related_tools=["check_critical_news", "get_news_since_last_update"],
-        prerequisite_tools=[]
-    ),
-    "check_critical_news": ToolMetadata(
-        name="check_critical_news",
-        category="discovery",
-        platform="any",
-        permission="read",
-        workflow="safety",
-        related_tools=["get_latest_news", "check_updates_dry_run"],
-        prerequisite_tools=[]
-    ),
-    "get_news_since_last_update": ToolMetadata(
-        name="get_news_since_last_update",
-        category="discovery",
-        platform="arch",
-        permission="read",
-        workflow="safety",
-        related_tools=["get_latest_news", "check_critical_news"],
-        prerequisite_tools=[]
-    ),
+      "search_aur": ToolMetadata(
+          name="search_aur",
+          category="discovery",
+          platform="any",
+          permission="read",
+          workflow="research",
+          related_tools=[
+              "get_official_package_info",
+              "audit_package_security",
+              "install_package_secure"
+          ],
+          prerequisite_tools=[]
+      ),
+     "get_official_package_info": ToolMetadata(
+         name="get_official_package_info",
+         category="discovery",
+         platform="any",
+         permission="read",
+         workflow="research",
+         related_tools=["search_aur", "install_package_secure"],
+         prerequisite_tools=[]
+     ),
+     "fetch_news": ToolMetadata(
+         name="fetch_news",
+         category="discovery",
+         platform="any",
+         permission="read",
+         workflow="safety",
+         related_tools=["check_updates_dry_run"],
+         prerequisite_tools=[]
+     ),
 
     # ========================================================================
     # Package Lifecycle (2 tools)
