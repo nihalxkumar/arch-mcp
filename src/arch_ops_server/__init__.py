@@ -6,7 +6,7 @@ A Model Context Protocol server that bridges AI assistants with the Arch Linux
 ecosystem, providing access to the Arch Wiki, AUR, and official repositories.
 """
 
-__version__ = "3.3.6"
+__version__ = "3.4.0"
 
 from .wiki import search_wiki, get_wiki_page, get_wiki_page_as_text
 from .aur import (
@@ -49,7 +49,7 @@ from .system import (
     diagnose_system,
 )
 from .system_health_check import run_system_health_check
-from .news import get_latest_news, check_critical_news, get_news_since_last_update
+from .news import get_latest_news, check_critical_news, get_news_since_last_update, fetch_news
 from .logs import (
     get_transaction_history,
     find_when_installed,
@@ -159,10 +159,11 @@ __all__ = [
     "check_failed_services",
     "get_boot_logs",
     "run_system_health_check",
-    # News
-    "get_latest_news",
-    "check_critical_news",
-    "get_news_since_last_update",
+     # News
+     "get_latest_news",
+     "check_critical_news",
+     "get_news_since_last_update",
+     "fetch_news",
     # Logs
     "get_transaction_history",
     "find_when_installed",
