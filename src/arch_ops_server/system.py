@@ -326,3 +326,25 @@ async def analyze_storage(action: str) -> Dict[str, Any]:
             "InvalidAction",
             f"Unknown action: {action}. Use 'disk_usage' or 'cache_stats'"
         )
+
+
+async def diagnose_system(action: str, lines: int = 100) -> Dict[str, Any]:
+    """
+    Unified system diagnostics for systemd-based systems.
+    
+    Args:
+        action: "failed_services" or "boot_logs"
+        lines: Number of log lines (for boot_logs action)
+    
+    Returns:
+        Diagnostic results based on action
+    """
+    if action == "failed_services":
+        return await check_failed_services()
+    elif action == "boot_logs":
+        return await get_boot_logs(lines=lines)
+    else:
+        return create_error_response(
+            "InvalidAction",
+            f"Unknown action: {action}. Use 'failed_services' or 'boot_logs'"
+        )

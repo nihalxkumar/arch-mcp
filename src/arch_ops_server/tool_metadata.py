@@ -189,7 +189,7 @@ TOOL_METADATA = {
      ),
 
     # ========================================================================
-    # System Monitoring (5 tools)
+    # System Monitoring (4 tools)
     # ========================================================================
     "get_system_info": ToolMetadata(
         name="get_system_info",
@@ -209,22 +209,13 @@ TOOL_METADATA = {
         related_tools=["check_failed_services"],
         prerequisite_tools=[]
     ),
-    "check_failed_services": ToolMetadata(
-        name="check_failed_services",
+    "diagnose_system": ToolMetadata(
+        name="diagnose_system",
         category="monitoring",
         platform="systemd",
         permission="read",
         workflow="diagnose",
-        related_tools=["get_boot_logs", "get_system_info"],
-        prerequisite_tools=[]
-    ),
-    "get_boot_logs": ToolMetadata(
-        name="get_boot_logs",
-        category="monitoring",
-        platform="systemd",
-        permission="read",
-        workflow="diagnose",
-        related_tools=["check_failed_services"],
+        related_tools=["analyze_storage"],
         prerequisite_tools=[]
     ),
     "run_system_health_check": ToolMetadata(

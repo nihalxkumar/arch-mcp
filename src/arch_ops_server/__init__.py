@@ -46,6 +46,7 @@ from .system import (
     analyze_storage,
     check_failed_services,
     get_boot_logs,
+    diagnose_system,
 )
 from .system_health_check import run_system_health_check
 from .news import get_latest_news, check_critical_news, get_news_since_last_update

@@ -54,6 +54,7 @@ from . import (
     analyze_storage,
     check_failed_services,
     get_boot_logs,
+    diagnose_system,
     # News functions
     get_latest_news,
     check_critical_news,
@@ -918,28 +919,23 @@ async def list_tools() -> list[Tool]:
         ),
 
         Tool(
-            name="check_failed_services",
-            description="[MONITORING] Check for failed systemd services. Useful for diagnosing system issues. Works on systemd-based systems. Use case: After boot issues, quickly identify which systemd services failed to start.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            },
-            annotations=ToolAnnotations(readOnlyHint=True)
-        ),
-
-        Tool(
-            name="get_boot_logs",
-            description="[MONITORING] Retrieve recent boot logs from journalctl. Useful for troubleshooting boot issues. Works on systemd-based systems. Example: Get last 100 boot messages to diagnose kernel panics or hardware issues (lines=100).",
+            name="diagnose_system",
+            description="[MONITORING] Unified system diagnostics for systemd-based systems. Actions: failed_services (check for failed systemd services), boot_logs (retrieve recent boot logs). Works on systemd-based systems only.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["failed_services", "boot_logs"],
+                        "description": "Diagnostic action to perform"
+                    },
                     "lines": {
                         "type": "integer",
-                        "description": "Number of log lines to retrieve. Default: 100",
+                        "description": "Number of log lines (for boot_logs). Default: 100",
                         "default": 100
                     }
                 },
-                "required": []
+                "required": ["action"]
             },
             annotations=ToolAnnotations(readOnlyHint=True)
         ),
@@ -1238,13 +1234,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         result = await analyze_storage(action)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-    elif name == "check_failed_services":
-        result = await check_failed_services()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-    elif name == "get_boot_logs":
+    elif name == "diagnose_system":
+        action = arguments["action"]
         lines = arguments.get("lines", 100)
-        result = await get_boot_logs(lines)
+        result = await diagnose_system(action, lines)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # News tools
