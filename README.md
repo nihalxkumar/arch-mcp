@@ -1,6 +1,7 @@
 # Arch Linux MCP Server
 
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/arch-ops-server?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLUE&right_color=BLACK&left_text=PyPi+Downloads)](https://pepy.tech/projects/arch-ops-server)
+[![smithery badge](https://smithery.ai/badge/@nihalxkumar/arch-mcp)](https://smithery.ai/server/@nihalxkumar/arch-mcp)
 
 <a href="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@nihalxkumar/arch-mcp/badge" />
@@ -100,19 +101,19 @@ Direct access to Arch ecosystem data via custom URI schemes:
 
 #### Package Lifecycle Management
 
-| Tool                     | Description                                                                   | Platform  |
-| ------------------------ | ----------------------------------------------------------------------------- | --------- |
-| `check_updates_dry_run`  | Check for available updates                                                   | Arch only |
-| `install_package_secure` | Install with security checks (blocks malicious packages)                      | Arch only |
-| `remove_packages`        | Remove packages - accepts single package name or list (with deps, forced)     | Arch only |
+| Tool                     | Description                                                               | Platform  |
+| ------------------------ | ------------------------------------------------------------------------- | --------- |
+| `check_updates_dry_run`  | Check for available updates                                               | Arch only |
+| `install_package_secure` | Install with security checks (blocks malicious packages)                  | Arch only |
+| `remove_packages`        | Remove packages - accepts single package name or list (with deps, forced) | Arch only |
 
 #### Package Analysis & Maintenance
 
-| Tool                       | Description                                                                                                                | Platform  |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Tool                       | Description                                                                                                                 | Platform  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `manage_orphans`           | Manage orphaned packages (2 actions: list orphaned packages, remove orphans). Always runs in dry-run mode first for safety. | Arch only |
-| `verify_package_integrity` | Check file integrity (modified/missing files)                                                                              | Arch only |
-| `manage_install_reason`    | Manage install reasons (3 actions: list explicit packages, mark as explicit/dependency)                                    | Arch only |
+| `verify_package_integrity` | Check file integrity (modified/missing files)                                                                               | Arch only |
+| `manage_install_reason`    | Manage install reasons (3 actions: list explicit packages, mark as explicit/dependency)                                     | Arch only |
 
 #### Package Organization
 
@@ -135,8 +136,8 @@ Direct access to Arch ecosystem data via custom URI schemes:
 
 #### Transaction History & Logs
 
-| Tool                    | Description                                                                                                                                                                                                                                                             | Platform  |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Tool                    | Description                                                                                                                                                                                                                                                                                                                   | Platform  |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `query_package_history` | Unified tool for querying package history from pacman logs (4 query types). Examples: `query_type='all'` shows recent transactions; `query_type='package', package_name='docker'` shows when docker was installed/upgraded; `query_type='failures'` shows failed operations; `query_type='sync'` shows database sync history. | Arch only |
 
 #### News & Safety Checks
@@ -149,16 +150,16 @@ Direct access to Arch ecosystem data via custom URI schemes:
 
 #### Mirror Management
 
-| Tool              | Description                                                                                           | Platform  |
-| ----------------- | ----------------------------------------------------------------------------------------------------- | --------- |
-| `optimize_mirrors` | Smart mirror management (4 actions: status, test, suggest, health). Examples: `optimize_mirrors(action='status', auto_test=True)` lists and tests all mirrors; `optimize_mirrors(action='suggest', country='US', limit=5)` suggests top 5 US mirrors; `optimize_mirrors(action='health')` checks for issues and gives recommendations. | Arch/Any  |
+| Tool               | Description                                                                                                                                                                                                                                                                                                                            | Platform |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `optimize_mirrors` | Smart mirror management (4 actions: status, test, suggest, health). Examples: `optimize_mirrors(action='status', auto_test=True)` lists and tests all mirrors; `optimize_mirrors(action='suggest', country='US', limit=5)` suggests top 5 US mirrors; `optimize_mirrors(action='health')` checks for issues and gives recommendations. | Arch/Any |
 
 #### Configuration Management
 
-| Tool                             | Description                                                                                                                                                                                                           | Platform  |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `analyze_pacman_conf`            | Parse pacman.conf settings with optional focus. Examples: `focus='full'` (default) returns all settings; `focus='ignored_packages'` returns only ignored packages with warnings for critical ones; `focus='parallel_downloads'` returns only parallel downloads setting with optimization recommendations. | Arch only |
-| `analyze_makepkg_conf`           | Parse makepkg.conf settings (CFLAGS, MAKEFLAGS, build configuration)                                                                                                                                                  | Arch only |
+| Tool                   | Description                                                                                                                                                                                                                                                                                                | Platform  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `analyze_pacman_conf`  | Parse pacman.conf settings with optional focus. Examples: `focus='full'` (default) returns all settings; `focus='ignored_packages'` returns only ignored packages with warnings for critical ones; `focus='parallel_downloads'` returns only parallel downloads setting with optimization recommendations. | Arch only |
+| `analyze_makepkg_conf` | Parse makepkg.conf settings (CFLAGS, MAKEFLAGS, build configuration)                                                                                                                                                                                                                                       | Arch only |
 
 #### Security Analysis
 
@@ -217,8 +218,8 @@ Opencode:
     "arch-linux": {
       "type": "local",
       "command": ["uvx", "arch-ops-server"]
-    },
-  },
+    }
+  }
 }
 ```
 
