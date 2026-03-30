@@ -178,6 +178,10 @@ Direct access to Arch ecosystem data via custom URI schemes:
 
 ---
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/nihalxkumar-arch-mcp).
+
 ## Installation
 
 ### Prerequisites
