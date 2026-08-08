@@ -3,6 +3,7 @@
 
 import pytest
 from arch_ops_server import audit_package_security
+from arch_ops_server.aur import BINARY_EXTENSIONS
 
 
 async def test_audit_package_security_pkgbuild_analysis():
@@ -89,6 +90,35 @@ async def test_pkgbuild_analysis_flags_multi_line_md5_array():
         )
     )
     assert "collision-broken" in _warning_text(result)
+
+
+async def test_pkgbuild_analysis_flags_appimage_sources():
+    """
+    A prebuilt AppImage is the archetypal opaque binary in an AUR recipe.
+
+    It went undetected for as long as the extension list was compared with the
+    wrong case, so it gets a test of its own and not only the sweep below.
+    """
+    result = await audit_package_security(
+        action="pkgbuild_analysis",
+        pkgbuild_content='source=("https://example.com/app-1.0.AppImage")\n'
+    )
+    assert "Binary file type detected: .AppImage" in _warning_text(result)
+
+
+@pytest.mark.parametrize("extension", BINARY_EXTENSIONS)
+async def test_every_binary_extension_is_detectable(extension):
+    """
+    Parametrised over the real list so a new entry is covered automatically.
+
+    This guards the class of bug rather than the instance: an entry carrying
+    capitals cannot silently stop matching again.
+    """
+    result = await audit_package_security(
+        action="pkgbuild_analysis",
+        pkgbuild_content=f'source=("https://example.com/app-1.0{extension}")\n'
+    )
+    assert f"Binary file type detected: {extension}" in _warning_text(result)
 
 
 async def test_audit_package_security_missing_pkgbuild():

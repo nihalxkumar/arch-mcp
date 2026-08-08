@@ -36,6 +36,10 @@ MAX_RESULTS = 50  # AUR RPC limit
 # whoever controls what the source URL serves can swap the bytes underneath it.
 WEAK_HASH_ALGORITHMS = frozenset({"md5", "sha1"})
 
+# Prebuilt artifacts a recipe pulls in rather than builds. Entries keep their
+# conventional casing and are matched case-insensitively.
+BINARY_EXTENSIONS = ('.bin', '.exe', '.AppImage', '.deb', '.rpm', '.jar', '.apk')
+
 
 async def search_aur(query: str, limit: int = 20, sort_by: str = "relevance") -> Dict[str, Any]:
     """
@@ -1146,9 +1150,11 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     # ========================================================================
     # DETECT BINARY DOWNLOADS
     # ========================================================================
-    binary_extensions = ['.bin', '.exe', '.AppImage', '.deb', '.rpm', '.jar', '.apk']
-    for ext in binary_extensions:
-        if ext in pkgbuild_content.lower():
+    # Both sides are lowered: matching a lowered haystack against an unlowered
+    # needle is how .AppImage went undetected.
+    content_lower = pkgbuild_content.lower()
+    for ext in BINARY_EXTENSIONS:
+        if ext.lower() in content_lower:
             warnings.append({
                 "line": 0,
                 "content": "",
