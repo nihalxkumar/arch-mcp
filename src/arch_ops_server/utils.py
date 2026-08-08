@@ -8,6 +8,8 @@ import asyncio
 import logging
 import os
 import platform
+import shlex
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -55,95 +57,139 @@ def is_arch_linux() -> bool:
 IS_ARCH = is_arch_linux()
 
 
+# Graphical password helpers, in the order they are tried.
+ASKPASS_HELPERS = (
+    "ksshaskpass",
+    "ssh-askpass",
+    "lxqt-openssh-askpass",
+    "x11-ssh-askpass",
+)
+
+
+def find_askpass() -> Optional[str]:
+    """
+    Locate a graphical helper sudo can use to prompt for a password.
+
+    The server has no controlling terminal, so sudo cannot prompt directly. A
+    graphical helper lets the user type their password into their own session;
+    the password never passes through this process. An explicitly configured
+    SUDO_ASKPASS wins over the built-in search order.
+
+    Returns:
+        Path to an executable askpass helper, or None if no graphical session
+        is available or no helper is installed.
+    """
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        logger.debug("No graphical session; askpass unavailable")
+        return None
+
+    configured = os.environ.get("SUDO_ASKPASS")
+    if configured and os.path.isfile(configured) and os.access(configured, os.X_OK):
+        logger.debug(f"Using configured SUDO_ASKPASS: {configured}")
+        return configured
+
+    for helper in ASKPASS_HELPERS:
+        path = shutil.which(helper)
+        if path:
+            logger.debug(f"Found askpass helper: {path}")
+            return path
+
+    logger.debug("No askpass helper installed")
+    return None
+
+
+def format_command(cmd: list[str]) -> str:
+    """
+    Render an argument vector as a copy-pasteable shell command.
+
+    Args:
+        cmd: Command and arguments as a list.
+
+    Returns:
+        A quoted command string safe to show the user.
+    """
+    return shlex.join(cmd)
+
+
 async def run_command(
     cmd: list[str],
     timeout: int = 10,
-    check: bool = True,
-    skip_sudo_check: bool = False
+    check: bool = True
 ) -> tuple[int, str, str]:
     """
     Execute a command asynchronously with timeout protection.
-    
-    Note: For sudo commands, stdin is properly connected to allow password input
-    if passwordless sudo is not configured.
-    
+
+    Privileged commands are escalated through sudo's askpass helper, so the
+    password is entered by the user in their own graphical session. This process
+    never reads, relays or stores it, and no passwordless sudo rule is required.
+    The child's stdin is always closed: nothing here writes a password to a pipe.
+
     Args:
         cmd: Command and arguments as list
         timeout: Timeout in seconds (default: 10)
         check: If True, raise exception on non-zero exit code
-        skip_sudo_check: If True, skip the early sudo password check (for testing)
-    
+
     Returns:
         Tuple of (exit_code, stdout, stderr)
-    
+
     Raises:
         asyncio.TimeoutError: If command exceeds timeout
         RuntimeError: If check=True and command fails
     """
-    logger.debug(f"Executing command: {' '.join(cmd)}")
-    
-    # Check if this is a sudo command and if password is cached
-    is_sudo_command = cmd and cmd[0] == "sudo"
-    if is_sudo_command and not skip_sudo_check:
-        # Test if sudo password is cached (non-interactive mode)
-        test_cmd = ["sudo", "-n", "true"]
-        try:
-            test_process = await asyncio.create_subprocess_exec(
-                *test_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+    logger.debug(f"Executing command: {format_command(cmd)}")
+
+    env = os.environ.copy()
+
+    # Route sudo through a graphical askpass helper. Without a terminal, plain
+    # sudo would either fail or silently depend on a NOPASSWD rule.
+    if cmd and cmd[0] == "sudo":
+        askpass = find_askpass()
+        if not askpass:
+            message = (
+                "No graphical password prompt is available, so this command cannot "
+                "be run from here. Run it yourself in a terminal:\n\n"
+                f"    {format_command(cmd)}\n\n"
+                "Alternatively install an askpass helper "
+                f"({', '.join(ASKPASS_HELPERS[:3])}) and retry. Do not add a "
+                "passwordless sudo rule to work around this."
             )
-            await test_process.communicate()
-            password_cached = test_process.returncode == 0
-            logger.debug(f"Sudo password cached: {password_cached}")
-            
-            if not password_cached:
-                logger.warning("Sudo password is required but not cached. "
-                              "Please run 'sudo pacman -S <package>' manually in the terminal.")
-                return (
-                    1,
-                    "",
-                    "Sudo password required. Please configure passwordless sudo for pacman/paru, "
-                    "or run the installation command manually in your terminal."
-                )
-        except Exception as e:
-            logger.warning(f"Could not check sudo status: {e}")
-            password_cached = False
-    else:
-        password_cached = True
-    
+            logger.warning("Refusing to run sudo command: no askpass helper available")
+            return 1, "", message
+
+        env["SUDO_ASKPASS"] = askpass
+        # -A tells sudo to use SUDO_ASKPASS rather than looking for a terminal.
+        if "-A" not in cmd:
+            cmd = [cmd[0], "-A"] + list(cmd[1:])
+
     try:
-        # Attach stdin to subprocess for commands that might need input
-        # Use asyncio.subprocess.PIPE to allow stdin interaction
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.PIPE if is_sudo_command else None
+            stdin=asyncio.subprocess.DEVNULL,
+            env=env
         )
-        
-        # Communicate with the process
-        # For sudo commands, this allows password input if needed
+
         stdout, stderr = await asyncio.wait_for(
             process.communicate(),
             timeout=timeout
         )
-        
+
         exit_code = process.returncode
         stdout_str = stdout.decode('utf-8', errors='replace') if stdout else ""
         stderr_str = stderr.decode('utf-8', errors='replace') if stderr else ""
-        
+
         logger.debug(f"Command exit code: {exit_code}")
-        
+
         if check and exit_code != 0:
             raise RuntimeError(
                 f"Command failed with exit code {exit_code}: {stderr_str}"
             )
-        
+
         return exit_code, stdout_str, stderr_str
-        
+
     except asyncio.TimeoutError:
-        logger.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+        logger.error(f"Command timed out after {timeout}s: {format_command(cmd)}")
         raise
     except Exception as e:
         logger.error(f"Command execution failed: {e}")
@@ -279,18 +325,16 @@ def _get_wiki_suggestions_for_error(error_type: str, message: str) -> list[str]:
 def check_command_exists(command: str) -> bool:
     """
     Check if a command exists in the system PATH.
-    
+
     Args:
         command: Command name to check
-    
+
     Returns:
         bool: True if command exists, False otherwise
     """
-    try:
-        result = os.system(f"which {command} > /dev/null 2>&1")
-        return result == 0
-    except Exception:
-        return False
+    # shutil.which does not involve a shell, so a command name containing shell
+    # metacharacters cannot be executed here.
+    return shutil.which(command) is not None
 
 
 def get_aur_helper() -> Optional[str]:

@@ -13,6 +13,8 @@ from datetime import datetime
 from .utils import (
     create_error_response,
     add_aur_warning,
+    find_askpass,
+    format_command,
     get_aur_helper,
     IS_ARCH,
     run_command
@@ -695,40 +697,30 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
     }
     
     # ========================================================================
-    # STEP 0: Verify sudo is configured properly
+    # STEP 0: Verify a password prompt is available
     # ========================================================================
-    logger.info("[STEP 0/5] Verifying sudo configuration...")
-    
-    # Test if sudo password is cached or passwordless sudo is configured
-    # Use skip_sudo_check=True to avoid recursive check
-    test_exit_code, _, test_stderr = await run_command(
-        ["sudo", "-n", "true"],
-        timeout=5,
-        check=False,
-        skip_sudo_check=True
-    )
-    
-    if test_exit_code != 0:
-        result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
+    logger.info("[STEP 0/5] Checking for a graphical password prompt...")
+
+    if not find_askpass():
+        result["messages"].append("⚠️  NO PASSWORD PROMPT AVAILABLE")
         result["messages"].append("")
-        result["messages"].append("Package installation requires sudo privileges.")
-        result["messages"].append("Please choose one of these options:")
+        result["messages"].append("Installing packages requires root privileges, and this")
+        result["messages"].append("server has no terminal to prompt you on.")
         result["messages"].append("")
-        result["messages"].append("Option 1: Configure passwordless sudo for pacman:")
-        result["messages"].append("  sudo visudo -f /etc/sudoers.d/arch-package-install")
-        result["messages"].append("  Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
+        result["messages"].append("Option 1: Install a graphical askpass helper, then retry:")
+        result["messages"].append("  pacman -S ksshaskpass")
         result["messages"].append("")
-        result["messages"].append("Option 2: Cache sudo password temporarily:")
-        result["messages"].append("  Run: sudo -v")
-        result["messages"].append("  Then retry the installation")
-        result["messages"].append("")
-        result["messages"].append("Option 3: Install manually in terminal:")
+        result["messages"].append("Option 2: Install manually in your own terminal:")
         result["messages"].append(f"  sudo pacman -S {package_name}")
-        result["security_checks"]["decision"] = "SUDO_REQUIRED"
+        result["messages"].append("")
+        result["messages"].append("Do not add a passwordless sudo rule to work around this;")
+        result["messages"].append("it would let any tool call install packages as root")
+        result["messages"].append("with no confirmation.")
+        result["security_checks"]["decision"] = "NO_PASSWORD_PROMPT"
         return result
-    
-    result["messages"].append("✅ Sudo privileges verified")
-    
+
+    result["messages"].append("✅ Graphical password prompt available")
+
     # ========================================================================
     # STEP 1: Check if package is in official repos first
     # ========================================================================
@@ -767,14 +759,11 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
                 # Check for sudo password issues
                 if "password" in stderr.lower() or "sudo" in stderr.lower():
                     result["messages"].append("")
-                    result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
-                    result["messages"].append("To enable passwordless installation, run one of these commands:")
-                    result["messages"].append("1. For passwordless sudo (less secure):")
-                    result["messages"].append("   sudo visudo -f /etc/sudoers.d/arch-package-install")
-                    result["messages"].append("   Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
-                    result["messages"].append("2. Or run the installation manually in your terminal:")
+                    result["messages"].append("⚠️  AUTHENTICATION FAILED")
+                    result["messages"].append("The password prompt was cancelled or the password was wrong.")
+                    result["messages"].append("Retry, or run the installation in your own terminal:")
                     result["messages"].append(f"   sudo pacman -S {package_name}")
-                
+
             result["install_output"] = stdout
             result["install_errors"] = stderr
             
