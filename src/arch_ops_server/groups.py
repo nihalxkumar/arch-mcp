@@ -41,7 +41,13 @@ async def _list_packages_in_group(group_name: str) -> dict:
         ["pacman", "-Sg", "--", group_name], timeout=10, check=False
     )
     if exit_code != 0:
-        return create_error_response("NotFound", f"Group not found: {group_name}")
+        # pacman exits non-zero for an unknown group, but also for a database it
+        # cannot read. Keep stderr so the second case is not reported as the first.
+        return create_error_response(
+            "NotFound",
+            f"Group not found: {group_name}",
+            stderr.strip() or None
+        )
     packages = []
     for line in stdout.strip().split("\n"):
         if line.strip():

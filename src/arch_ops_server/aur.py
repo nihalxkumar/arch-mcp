@@ -706,29 +706,26 @@ async def install_package_secure(
     }
 
     # ========================================================================
-    # STEP 0: If this call would install, verify a password prompt exists
+    # STEP 0: Note whether a graphical password prompt is available
     # ========================================================================
+    # Only a warning, never a refusal. Without a helper, run_command falls back
+    # to `sudo -n`, which still succeeds for a user with a valid sudo timestamp
+    # and otherwise reports how to proceed. Refusing here would make this tool
+    # unusable over SSH or on a headless machine, where every other privileged
+    # tool in this server keeps working.
     if confirm and not find_askpass():
-        logger.info("Install requested but no askpass helper is available")
-        result["messages"].append("⚠️  NO PASSWORD PROMPT AVAILABLE")
-        result["messages"].append("")
-        result["messages"].append("Installing packages requires root privileges, and this")
-        result["messages"].append("server has no terminal to prompt you on.")
-        result["messages"].append("")
-        result["messages"].append("Option 1: Install an askpass helper for your desktop, then retry:")
-        result["messages"].append("  GNOME: pacman -S seahorse")
-        result["messages"].append("  KDE:   pacman -S ksshaskpass")
-        result["messages"].append("  LXQt:  pacman -S lxqt-openssh-askpass")
-        result["messages"].append("  Other: pacman -S x11-ssh-askpass")
-        result["messages"].append("")
-        result["messages"].append("Option 2: Install manually in your own terminal:")
-        result["messages"].append(f"  sudo pacman -S {package_name}")
-        result["messages"].append("")
-        result["messages"].append("Do not add a passwordless sudo rule to work around this;")
-        result["messages"].append("it would let any tool call install packages as root")
-        result["messages"].append("with no confirmation.")
-        result["security_checks"]["decision"] = "NO_PASSWORD_PROMPT"
-        return result
+        logger.info("No askpass helper available; sudo will be attempted non-interactively")
+        result["messages"].append("⚠️  No graphical password prompt is available.")
+        result["messages"].append("   sudo will be attempted non-interactively, which works if")
+        result["messages"].append("   your sudo credentials are still valid. If they are not,")
+        result["messages"].append("   install an askpass helper for your desktop and retry:")
+        result["messages"].append("     GNOME: pacman -S seahorse")
+        result["messages"].append("     KDE:   pacman -S ksshaskpass")
+        result["messages"].append("     LXQt:  pacman -S lxqt-openssh-askpass")
+        result["messages"].append("     Other: pacman -S x11-ssh-askpass")
+        result["messages"].append("   ...or run the install in your own terminal. Do not add a")
+        result["messages"].append("   passwordless sudo rule to work around this; it would let")
+        result["messages"].append("   any tool call reach root with no confirmation.")
 
     # ========================================================================
     # STEP 1: Check if package is in official repos first

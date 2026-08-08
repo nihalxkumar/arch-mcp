@@ -502,7 +502,8 @@ async def remove_packages_batch(
         exit_code, stdout, stderr = await run_command(
             cmd,
             timeout=120,  # Longer timeout for batch removal
-            check=False)
+            check=False
+        )
 
         if exit_code != 0:
             logger.error(f"Batch removal failed: {stderr}")
@@ -759,7 +760,8 @@ async def remove_orphans(
         exit_code, stdout, stderr = await run_command(
             cmd,
             timeout=120,
-            check=False)
+            check=False
+        )
 
         if exit_code != 0:
             logger.error(f"Orphan removal failed: {stderr}")
@@ -1446,7 +1448,8 @@ async def mark_as_explicit(package_name: str) -> Dict[str, Any]:
         exit_code, stdout, stderr = await run_command(
             ["sudo", "pacman", "-D", "--asexplicit", "--", package_name],
             timeout=10,
-            check=False)
+            check=False
+        )
 
         if exit_code != 0:
             return create_error_response(
@@ -1503,7 +1506,8 @@ async def mark_as_dependency(package_name: str) -> Dict[str, Any]:
         exit_code, stdout, stderr = await run_command(
             ["sudo", "pacman", "-D", "--asdeps", "--", package_name],
             timeout=10,
-            check=False)
+            check=False
+        )
 
         if exit_code != 0:
             return create_error_response(

@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 # pacman accepts alphanumerics plus '@', '.', '_', '+' and '-' in package names.
 # A leading '-' is excluded by construction so a name can never look like a flag.
 # An optional 'repo/' prefix is allowed because 'core/linux' is ordinary usage.
+# Version constraints ('bash>=5') are deliberately not accepted: no call site
+# here passes one, and '<'/'>' would have to be re-examined before allowing them.
 _PACKAGE_NAME = re.compile(r"^(?:[a-zA-Z0-9_][a-zA-Z0-9._-]*/)?[a-zA-Z0-9@._+][a-zA-Z0-9@._+-]*$")
 
 # Package groups follow the same naming rules, without the repo prefix.
@@ -205,6 +207,15 @@ def validate_public_url(url: str) -> str:
     Without this, a tool that accepts a URL becomes a probe for whatever the
     host can reach that the caller cannot: loopback services, link-local
     metadata endpoints, and other machines on the local network.
+
+    The check resolves the host here, while the HTTP client resolves it again
+    when it connects, so a name that changes answers between the two calls can
+    still slip through. Closing that would mean pinning the connection to the
+    address checked. For a mirror speed test the caller learns only a timing,
+    so the bound is drawn here deliberately rather than overlooked.
+
+    A mirror on your own network is rejected too. That is the cost of the rule,
+    not an oversight -- see the security section of the README.
 
     Args:
         url: Candidate URL.

@@ -11,7 +11,8 @@ Usage:
     arch-ops-server-http &
     python scripts/smoke_http_server.py
 
-Set ARCH_MCP_URL to point somewhere other than the default.
+Set ARCH_MCP_URL to point elsewhere, and ARCH_MCP_AUTH_TOKEN to match the
+token the server was started with.
 """
 import asyncio
 import os
@@ -23,10 +24,15 @@ async def run_smoke_test():
     """Exercise the MCP HTTP endpoint end to end against a running server."""
     base_url = os.getenv("ARCH_MCP_URL", "http://127.0.0.1:8080").rstrip("/")
 
+    # The server rejects unauthenticated requests whenever a token is configured.
+    token = os.getenv("ARCH_MCP_AUTH_TOKEN", "")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
     print("Testing MCP HTTP Server...")
     print(f"Connecting to {base_url}")
+    print(f"Authentication: {'bearer token' if token else 'none configured'}")
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
         # Test 1: Direct HTTP - Initialize
         print("\n1. Testing direct HTTP initialize...")
         try:
@@ -45,6 +51,11 @@ async def run_smoke_test():
             if response.status_code == 200:
                 result = response.json()
                 print(f"   ✓ Initialize response: {json.dumps(result, indent=2)}")
+            elif response.status_code == 401:
+                print("   ✗ Status: 401 unauthorized")
+                print("   The server was started with ARCH_MCP_AUTH_TOKEN set.")
+                print("   Export the same value here and retry.")
+                return False
             else:
                 print(f"   ✗ Status: {response.status_code}")
                 print(f"   Response: {response.text}")

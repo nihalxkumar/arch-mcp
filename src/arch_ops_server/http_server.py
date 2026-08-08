@@ -37,7 +37,19 @@ ALLOW_INSECURE_BIND_ENV = "ARCH_MCP_ALLOW_INSECURE_BIND"
 # as root, so exposing them to the network must be a deliberate choice.
 DEFAULT_HOST = "127.0.0.1"
 
-AUTH_TOKEN = os.getenv(AUTH_TOKEN_ENV, "")
+
+def get_auth_token() -> str:
+    """
+    Read the configured bearer token.
+
+    Read on each use rather than captured at import time, so that an embedder
+    that sets the variable after importing this module still gets authentication,
+    and so the behaviour is testable.
+
+    Returns:
+        The configured token, or "" if authentication is not configured.
+    """
+    return os.getenv(AUTH_TOKEN_ENV, "")
 
 try:
     from mcp.server.sse import SseServerTransport
@@ -107,7 +119,11 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app, token: str):
         super().__init__(app)
-        self._token = token
+        # Compared as bytes. Starlette decodes headers as latin-1, so a header
+        # carrying a byte above 0x7f yields a non-ASCII str, and
+        # hmac.compare_digest rejects those with TypeError -- which would turn
+        # an unauthorised request into an unhandled 500.
+        self._token = token.encode("utf-8", "surrogateescape")
 
     async def dispatch(self, request: "Request", call_next):
         # Preflight carries no credentials; CORS middleware answers it.
@@ -119,7 +135,9 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
         # Constant-time comparison so a wrong token cannot be recovered by
         # timing the response.
-        if scheme.lower() != "bearer" or not hmac.compare_digest(presented, self._token):
+        if scheme.lower() != "bearer" or not hmac.compare_digest(
+            presented.encode("utf-8", "surrogateescape"), self._token
+        ):
             logger.warning(
                 f"Rejected unauthenticated request to {request.url.path} "
                 f"from {request.client.host if request.client else 'unknown'}"
@@ -812,8 +830,9 @@ def create_app() -> Any:
     # Require a bearer token when one is configured. This server exposes tools
     # that run pacman as root, so an unauthenticated endpoint is a remote root
     # surface.
-    if AUTH_TOKEN:
-        app.add_middleware(BearerTokenMiddleware, token=AUTH_TOKEN)
+    auth_token = get_auth_token()
+    if auth_token:
+        app.add_middleware(BearerTokenMiddleware, token=auth_token)
         logger.info("Bearer token authentication enabled")
     else:
         logger.warning(
@@ -868,7 +887,7 @@ async def run_http_server(host: Optional[str] = None, port: int = 8080) -> None:
         host = os.getenv(HOST_ENV, DEFAULT_HOST)
 
     if host not in ("127.0.0.1", "::1", "localhost"):
-        if AUTH_TOKEN:
+        if get_auth_token():
             logger.warning(
                 f"Binding to {host}: reachable beyond this machine, "
                 "protected by bearer token."

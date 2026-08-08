@@ -221,6 +221,9 @@ async def run_command(
     # Route sudo through an askpass helper. There is no terminal to prompt on,
     # so without one sudo would block or fall back to a NOPASSWD rule.
     needs_sudo_fallback_message = False
+    # Kept before the rewrite below, so the "run this yourself" message shows the
+    # command the caller asked for rather than the flags added here.
+    original_cmd = list(cmd)
     if cmd and cmd[0] == "sudo":
         askpass = find_askpass()
         if askpass:
@@ -267,7 +270,7 @@ async def run_command(
                 "no askpass helper is installed and your sudo credentials are not "
                 "currently valid.\n\n"
                 "Run it yourself in a terminal:\n\n"
-                f"    {format_command([c for c in cmd if c != '-n'])}\n\n"
+                f"    {format_command(original_cmd)}\n\n"
                 "Or install an askpass helper for your desktop and retry -- for "
                 "example seahorse on GNOME, ksshaskpass on KDE, or "
                 "lxqt-openssh-askpass on LXQt.\n\n"

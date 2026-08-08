@@ -252,14 +252,21 @@ that can modify your system. Treat a package description that tells the assistan
 something as what it is.
 
 **The HTTP transport listens on localhost only.** Binding elsewhere requires
-`ARCH_MCP_AUTH_TOKEN` (bearer token auth). CORS is off unless you list origins in
-`ARCH_MCP_ALLOWED_ORIGINS`. For local use prefer the STDIO transport, which needs none of this.
+`ARCH_MCP_AUTH_TOKEN` (bearer token auth); the server refuses to start otherwise. CORS is off
+unless you list origins in `ARCH_MCP_ALLOWED_ORIGINS`. For local use prefer the STDIO transport,
+which needs none of this.
+
+**Mirror speed tests only reach public addresses.** `optimize_mirrors` with `action="test"`
+rejects a URL resolving to a loopback, private or link-local address, so a caller cannot use it
+to probe your LAN or a cloud metadata endpoint. The cost is that it cannot measure a mirror on
+your own network either; test those with `rankmirrors` instead.
 
 | Variable | Purpose |
 | --- | --- |
 | `ARCH_MCP_HOST` | Bind address for the HTTP transport (default `127.0.0.1`) |
 | `ARCH_MCP_AUTH_TOKEN` | Required bearer token; also required to bind a non-loopback address |
 | `ARCH_MCP_ALLOWED_ORIGINS` | Comma-separated CORS origins (default: none) |
+| `ARCH_MCP_ALLOW_INSECURE_BIND` | Permit a non-loopback bind with no token. Only for container platforms that control who can reach the port — `Dockerfile.smithery` sets it |
 | `SUDO_ASKPASS` | Askpass helper to use, if you want to override auto-detection |
 
 ## Contributing

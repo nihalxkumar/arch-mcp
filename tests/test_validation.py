@@ -222,6 +222,36 @@ class TestConfirmationGates:
         assert result["installed"] is False
         assert result["security_checks"]["decision"] == "MANUAL_INSTALL_REQUIRED"
 
+    @pytest.mark.asyncio
+    async def test_install_still_attempted_without_a_graphical_prompt(self):
+        """
+        No askpass helper is a warning, not a refusal.
+
+        On a headless or SSH session find_askpass() always returns None. run_command
+        falls back to `sudo -n`, which still works for a user with a valid sudo
+        timestamp, so this path must reach the command rather than bail out early.
+        """
+        from arch_ops_server import aur
+
+        spawned = {}
+
+        async def official(_name):
+            return {"found": True, "repository": "extra"}
+
+        async def fake_run(cmd, **_kwargs):
+            spawned["cmd"] = cmd
+            return 0, "installed", ""
+
+        with patch("arch_ops_server.pacman.get_official_package_info", new=official), \
+             patch.object(aur, "find_askpass", return_value=None), \
+             patch.object(aur, "run_command", new=fake_run):
+            result = await aur.install_package_secure("firefox", confirm=True)
+
+        assert result["installed"] is True
+        assert spawned["cmd"][:2] == ["sudo", "pacman"]
+        # The advice is still given, just not as a refusal.
+        assert any("askpass" in m for m in result["messages"])
+
 
 class TestScanIsNotAVerdict:
     """The PKGBUILD scan reports findings; it must not certify a package."""
