@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import platform
+import re
 import shlex
 import shutil
 from pathlib import Path
@@ -58,22 +59,69 @@ IS_ARCH = is_arch_linux()
 
 
 # Graphical password helpers, in the order they are tried.
+# Askpass helpers that are normally on PATH, across desktops. No desktop
+# environment is assumed: whichever is installed gets used.
 ASKPASS_HELPERS = (
-    "ksshaskpass",
-    "ssh-askpass",
-    "lxqt-openssh-askpass",
-    "x11-ssh-askpass",
+    "ssh-askpass",              # Debian/Ubuntu alternatives, generic
+    "ksshaskpass",              # KDE / Plasma
+    "ssh-askpass-gnome",        # GNOME
+    "lxqt-openssh-askpass",     # LXQt
+    "ssh-askpass-fullscreen",
+    "x11-ssh-askpass",          # plain X11
+    "qt4-ssh-askpass",
 )
+
+# Several distributions install their helper outside PATH, so shutil.which
+# alone would report "not installed" on a perfectly working desktop.
+ASKPASS_PATHS = (
+    "/usr/lib/seahorse/ssh-askpass",            # GNOME/Seahorse, Arch
+    "/usr/libexec/seahorse/ssh-askpass",        # GNOME/Seahorse, Fedora
+    "/usr/libexec/openssh/gnome-ssh-askpass",   # Fedora
+    "/usr/lib/openssh/gnome-ssh-askpass",       # Debian/Ubuntu
+    "/usr/lib/ssh/x11-ssh-askpass",             # Arch x11-ssh-askpass
+    "/usr/lib/ssh/ssh-askpass",
+)
+
+
+def _is_executable(path: str) -> bool:
+    """Return True if path is an existing executable file."""
+    return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def _askpass_from_sudo_conf() -> Optional[str]:
+    """
+    Read the askpass helper configured in /etc/sudo.conf, if any.
+
+    sudo itself supports `Path askpass <program>`, so an administrator may have
+    already chosen a helper. Honour it rather than second-guessing.
+
+    Returns:
+        The configured path, or None if unset or unreadable.
+    """
+    try:
+        with open("/etc/sudo.conf", "r") as f:
+            for line in f:
+                match = re.match(r"^\s*Path\s+askpass\s+(\S+)", line, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+    except OSError:
+        pass
+    return None
 
 
 def find_askpass() -> Optional[str]:
     """
-    Locate a graphical helper sudo can use to prompt for a password.
+    Locate a helper sudo can use to prompt for a password.
 
-    The server has no controlling terminal, so sudo cannot prompt directly. A
-    graphical helper lets the user type their password into their own session;
-    the password never passes through this process. An explicitly configured
-    SUDO_ASKPASS wins over the built-in search order.
+    The server has no controlling terminal it can safely prompt on -- for the
+    STDIO transport, stdin carries the MCP protocol -- so sudo needs a separate
+    helper. The user types their password into their own session; it never
+    passes through this process.
+
+    No desktop environment is assumed. The search order is: an explicitly
+    configured SUDO_ASKPASS, then /etc/sudo.conf, then the helpers that ship
+    with each major desktop, on PATH and in the lib directories distributions
+    put them in.
 
     Returns:
         Path to an executable askpass helper, or None if no graphical session
@@ -84,18 +132,48 @@ def find_askpass() -> Optional[str]:
         return None
 
     configured = os.environ.get("SUDO_ASKPASS")
-    if configured and os.path.isfile(configured) and os.access(configured, os.X_OK):
+    if _is_executable(configured):
         logger.debug(f"Using configured SUDO_ASKPASS: {configured}")
         return configured
+
+    from_conf = _askpass_from_sudo_conf()
+    if _is_executable(from_conf):
+        logger.debug(f"Using askpass from /etc/sudo.conf: {from_conf}")
+        return from_conf
 
     for helper in ASKPASS_HELPERS:
         path = shutil.which(helper)
         if path:
+            logger.debug(f"Found askpass helper on PATH: {path}")
+            return path
+
+    for path in ASKPASS_PATHS:
+        if _is_executable(path):
             logger.debug(f"Found askpass helper: {path}")
             return path
 
     logger.debug("No askpass helper installed")
     return None
+
+
+def _is_sudo_auth_failure(stderr: str) -> bool:
+    """
+    Decide whether sudo failed for want of a password rather than on the command.
+
+    Args:
+        stderr: Captured standard error from the sudo invocation.
+
+    Returns:
+        True if sudo reported that it could not authenticate the user.
+    """
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in (
+        "a password is required",
+        "no askpass program",
+        "a terminal is required",
+        "no tty present",
+        "sorry, a password is required",
+    ))
 
 
 def format_command(cmd: list[str]) -> str:
@@ -140,26 +218,25 @@ async def run_command(
 
     env = os.environ.copy()
 
-    # Route sudo through a graphical askpass helper. Without a terminal, plain
-    # sudo would either fail or silently depend on a NOPASSWD rule.
+    # Route sudo through an askpass helper. There is no terminal to prompt on,
+    # so without one sudo would block or fall back to a NOPASSWD rule.
+    needs_sudo_fallback_message = False
     if cmd and cmd[0] == "sudo":
         askpass = find_askpass()
-        if not askpass:
-            message = (
-                "No graphical password prompt is available, so this command cannot "
-                "be run from here. Run it yourself in a terminal:\n\n"
-                f"    {format_command(cmd)}\n\n"
-                "Alternatively install an askpass helper "
-                f"({', '.join(ASKPASS_HELPERS[:3])}) and retry. Do not add a "
-                "passwordless sudo rule to work around this."
-            )
-            logger.warning("Refusing to run sudo command: no askpass helper available")
-            return 1, "", message
-
-        env["SUDO_ASKPASS"] = askpass
-        # -A tells sudo to use SUDO_ASKPASS rather than looking for a terminal.
-        if "-A" not in cmd:
-            cmd = [cmd[0], "-A"] + list(cmd[1:])
+        if askpass:
+            env["SUDO_ASKPASS"] = askpass
+            # -A tells sudo to use SUDO_ASKPASS rather than looking for a terminal.
+            if "-A" not in cmd:
+                cmd = [cmd[0], "-A"] + list(cmd[1:])
+        else:
+            # No helper, but sudo may not need to ask: the user may have a valid
+            # cached timestamp, or an authorisation rule they chose themselves.
+            # -n makes sudo either proceed without prompting or fail at once,
+            # so this can never block on a terminal we do not have.
+            if "-n" not in cmd:
+                cmd = [cmd[0], "-n"] + list(cmd[1:])
+            needs_sudo_fallback_message = True
+            logger.debug("No askpass helper; attempting sudo non-interactively")
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -180,6 +257,23 @@ async def run_command(
         stderr_str = stderr.decode('utf-8', errors='replace') if stderr else ""
 
         logger.debug(f"Command exit code: {exit_code}")
+
+        # Distinguish "sudo could not ask for a password" from a real command
+        # failure, and tell the user how to proceed without weakening sudo.
+        if needs_sudo_fallback_message and exit_code != 0 and _is_sudo_auth_failure(stderr_str):
+            logger.warning("sudo needs a password but no askpass helper is available")
+            return 1, "", (
+                "This command needs root, but there is no password prompt available: "
+                "no askpass helper is installed and your sudo credentials are not "
+                "currently valid.\n\n"
+                "Run it yourself in a terminal:\n\n"
+                f"    {format_command([c for c in cmd if c != '-n'])}\n\n"
+                "Or install an askpass helper for your desktop and retry -- for "
+                "example seahorse on GNOME, ksshaskpass on KDE, or "
+                "lxqt-openssh-askpass on LXQt.\n\n"
+                "Do not add a passwordless sudo rule to work around this: it would "
+                "let any tool call reach root with no confirmation."
+            )
 
         if check and exit_code != 0:
             raise RuntimeError(

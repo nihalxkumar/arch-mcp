@@ -4,6 +4,7 @@ Tests for arch_ops_server.utils module.
 """
 
 import asyncio
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +15,7 @@ from arch_ops_server.utils import (
     add_aur_warning,
     check_command_exists,
     create_error_response,
+    find_askpass,
     get_aur_helper,
     is_arch_linux,
     run_command,
@@ -135,26 +137,107 @@ class TestCommandExecution:
                 )
 
     @pytest.mark.asyncio
-    async def test_run_command_sudo_without_askpass_refuses(self):
-        """A sudo command with no askpass helper must not run at all."""
-        spawned = 0
+    async def test_run_command_without_askpass_tries_non_interactively(
+        self, mock_subprocess_success
+    ):
+        """
+        With no askpass helper, sudo is still attempted with -n.
+
+        A user may have a valid sudo timestamp or an authorisation rule of
+        their own; refusing outright would break them. -n guarantees sudo
+        never blocks waiting for a terminal we do not have.
+        """
+        captured = {}
 
         async def _create_subprocess(*args, **kwargs):
-            nonlocal spawned
-            spawned += 1
-            raise AssertionError("subprocess must not be spawned")
+            captured["argv"] = list(args)
+            return await mock_subprocess_success(*args, **kwargs)
 
         with patch("arch_ops_server.utils.find_askpass", return_value=None):
             with patch("asyncio.create_subprocess_exec", new=_create_subprocess):
-                exit_code, stdout, stderr = await run_command(
-                    ["sudo", "pacman", "-S", "test"]
+                exit_code, _, _ = await run_command(["sudo", "pacman", "-S", "test"])
+
+        assert exit_code == 0
+        assert captured["argv"][:2] == ["sudo", "-n"]
+
+    @pytest.mark.asyncio
+    async def test_run_command_reports_when_password_needed(self):
+        """When sudo cannot authenticate, explain rather than leak its error."""
+        async def _create_subprocess(*args, **kwargs):
+            process = MagicMock()
+            process.returncode = 1
+
+            async def _communicate():
+                return (b"", b"sudo: a password is required")
+
+            process.communicate = _communicate
+            return process
+
+        with patch("arch_ops_server.utils.find_askpass", return_value=None):
+            with patch("asyncio.create_subprocess_exec", new=_create_subprocess):
+                exit_code, _, stderr = await run_command(
+                    ["sudo", "pacman", "-S", "test"], check=False
                 )
 
         assert exit_code == 1
-        assert spawned == 0
-        # The user is told what to run themselves, and not to weaken sudo.
+        # The command to run by hand, without the internal -n flag.
         assert "sudo pacman -S test" in stderr
-        assert "passwordless sudo" in stderr
+        # Desktop-neutral advice, and no suggestion to weaken sudo.
+        assert "seahorse" in stderr and "ksshaskpass" in stderr
+        assert "Do not add a passwordless sudo rule" in stderr
+
+
+class TestAskpassDiscovery:
+    """Helper discovery must not assume any particular desktop."""
+
+    def test_no_graphical_session_means_no_helper(self):
+        with patch.dict(os.environ, {}, clear=True):
+            assert find_askpass() is None
+
+    def test_explicit_sudo_askpass_wins(self, tmp_path):
+        helper = tmp_path / "my-askpass"
+        helper.write_text("#!/bin/sh\n")
+        helper.chmod(0o755)
+
+        with patch.dict(os.environ, {"DISPLAY": ":0", "SUDO_ASKPASS": str(helper)}):
+            assert find_askpass() == str(helper)
+
+    def test_finds_helper_on_path(self):
+        with patch.dict(os.environ, {"DISPLAY": ":0"}, clear=True):
+            with patch("shutil.which", side_effect=lambda n: "/usr/bin/" + n
+                       if n == "ssh-askpass-gnome" else None):
+                assert find_askpass() == "/usr/bin/ssh-askpass-gnome"
+
+    def test_finds_helper_installed_outside_path(self):
+        """GNOME/Seahorse ships outside PATH; which() alone would miss it."""
+        gnome_helper = "/usr/lib/seahorse/ssh-askpass"
+
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-0"}, clear=True):
+            with patch("shutil.which", return_value=None):
+                with patch("arch_ops_server.utils._is_executable",
+                           side_effect=lambda p: p == gnome_helper):
+                    assert find_askpass() == gnome_helper
+
+    def test_honours_sudo_conf(self, tmp_path):
+        configured = "/opt/custom/askpass"
+
+        with patch.dict(os.environ, {"DISPLAY": ":0"}, clear=True):
+            with patch("arch_ops_server.utils._askpass_from_sudo_conf",
+                       return_value=configured):
+                with patch("arch_ops_server.utils._is_executable",
+                           side_effect=lambda p: p == configured):
+                    assert find_askpass() == configured
+
+    def test_helper_list_is_not_kde_only(self):
+        """Regression guard: the search must cover the major desktops."""
+        from arch_ops_server.utils import ASKPASS_HELPERS, ASKPASS_PATHS
+
+        combined = " ".join(ASKPASS_HELPERS) + " " + " ".join(ASKPASS_PATHS)
+        assert "ksshaskpass" in combined          # KDE
+        assert "seahorse" in combined             # GNOME
+        assert "gnome-ssh-askpass" in combined    # GNOME, Debian/Fedora layout
+        assert "lxqt-openssh-askpass" in combined  # LXQt
+        assert "x11-ssh-askpass" in combined      # plain X11
 
     @pytest.mark.asyncio
     async def test_run_command_sudo_uses_askpass(self, mock_subprocess_success):

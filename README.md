@@ -237,10 +237,14 @@ the build fetches while it runs, and ordinary shell quoting defeats it. A clean 
 evidence that a package is safe, so the tool returns the audit and the command for you to run
 under your AUR helper's own diff review.
 
-**Root access goes through a graphical askpass prompt.** Set up `ksshaskpass`, `ssh-askpass`
-or a similar helper and the server will ask sudo to prompt you in your own session; your
-password never passes through the server process. **Do not add a `NOPASSWD` sudoers rule** —
-that removes the last human in the loop, letting any tool call reach root unprompted.
+**Root access goes through an askpass prompt.** No desktop environment is assumed: the server
+looks for whichever helper you have — `seahorse` (GNOME), `ksshaskpass` (KDE),
+`lxqt-openssh-askpass` (LXQt), `x11-ssh-askpass`, or anything you set in `SUDO_ASKPASS` or
+`/etc/sudo.conf` — and asks sudo to prompt you in your own session. Your password never passes
+through the server process. If no helper is available, sudo is still attempted
+non-interactively, so an already-valid sudo timestamp keeps working; otherwise you get the
+command to run yourself. **Do not add a `NOPASSWD` sudoers rule** — that removes the last human
+in the loop, letting any tool call reach root unprompted.
 
 **Be aware of what reaches the model.** Tools like `search_aur`, `fetch_news` and
 `search_archwiki` pull third-party text into the conversation, in the same session as tools
