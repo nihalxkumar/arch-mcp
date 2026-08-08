@@ -34,6 +34,8 @@ from . import (
     get_pkgbuild,
     audit_package_security,
     install_package_secure,
+    analyze_package_metadata_risk,
+    analyze_pkgbuild_safety,
     # Pacman functions
     get_official_package_info,
     check_updates_dry_run,
@@ -1420,7 +1422,7 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
         messages = [
             PromptMessage(
                 role="user",
-                content=PromptMessage.TextContent(
+                content=TextContent(
                     type="text",
                     text=f"I'm experiencing this error: {error_message}\n\nContext: {context}\n\nPlease help me troubleshoot this issue using Arch Linux knowledge."
                 )
@@ -1436,7 +1438,7 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             messages.append(
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=wiki_content
                     )
@@ -1460,18 +1462,35 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             metadata_risk = analyze_package_metadata_risk(package_info)
             pkgbuild_safety = analyze_pkgbuild_safety(pkgbuild_content)
             
+            # analyze_pkgbuild_safety reports findings in three severity
+            # buckets; there is no combined "findings" key, so counting one
+            # produced zero every time regardless of what the scan found.
+            red_flags = pkgbuild_safety.get('red_flags', [])
+            warnings = pkgbuild_safety.get('warnings', [])
+            info = pkgbuild_safety.get('info', [])
+
+            # Both metadata lists hold dicts, not strings; joining them directly
+            # raises TypeError and loses the whole report.
+            risk_factors = "; ".join(
+                f.get('issue', '') for f in metadata_risk.get('risk_factors', [])
+            ) or "none recorded"
+            trust_indicators = "; ".join(
+                t.get('indicator', '') for t in metadata_risk.get('trust_indicators', [])
+            ) or "none recorded"
+
             audit_summary = f"""
 # Security Audit Report for {package_name}
 
 ## Package Metadata Analysis
 - **Trust Score**: {metadata_risk.get('trust_score', 'N/A')}/100
-- **Risk Factors**: {', '.join(metadata_risk.get('risk_factors', []))}
-- **Trust Indicators**: {', '.join(metadata_risk.get('trust_indicators', []))}
+- **Risk Factors**: {risk_factors}
+- **Trust Indicators**: {trust_indicators}
 
 ## PKGBUILD Security Analysis
 - **Risk Score**: {pkgbuild_safety.get('risk_score', 'N/A')}/100
-- **Security Issues Found**: {len(pkgbuild_safety.get('findings', []))}
-- **Critical Issues**: {len([f for f in pkgbuild_safety.get('findings', []) if f.get('severity') == 'critical'])}
+- **Critical Issues**: {len(red_flags)}
+- **Warnings**: {len(warnings)}
+- **Informational**: {len(info)}
 
 ## Recommendations
 """
@@ -1486,14 +1505,14 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             messages = [
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"Please audit the AUR package '{package_name}' for security issues before installation."
                     )
                 ),
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=audit_summary
                     )
@@ -1511,7 +1530,7 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=f"Error auditing package '{package_name}': {str(e)}"
                         )
@@ -1597,14 +1616,14 @@ paru -S {package_name}  # or yay -S {package_name}
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"Please analyze the dependencies for the package '{package_name}' and suggest the best installation approach."
                     )
                 ),
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=analysis
                     )
@@ -1619,7 +1638,7 @@ paru -S {package_name}  # or yay -S {package_name}
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=create_platform_error_message("safe_system_update prompt")
                         )
@@ -1688,7 +1707,7 @@ paru -S {package_name}  # or yay -S {package_name}
                     messages=[
                         PromptMessage(
                             role="assistant",
-                            content=PromptMessage.TextContent(
+                            content=TextContent(
                                 type="text",
                                 text=analysis
                             )
@@ -1752,14 +1771,14 @@ paru -S {package_name}  # or yay -S {package_name}
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text="Check if my system is ready for a safe update"
                     )
                 ),
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=analysis
                     )
@@ -1774,7 +1793,7 @@ paru -S {package_name}  # or yay -S {package_name}
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=create_platform_error_message("cleanup_system prompt")
                         )
@@ -1789,7 +1808,7 @@ paru -S {package_name}  # or yay -S {package_name}
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"""Please perform a comprehensive system cleanup:
 
@@ -1833,7 +1852,7 @@ Be thorough and explain each step."""
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text="Error: package_name argument is required"
                         )
@@ -1846,7 +1865,7 @@ Be thorough and explain each step."""
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"""Please investigate the package '{package_name}' thoroughly before installation:
 
@@ -1904,7 +1923,7 @@ Be comprehensive and explain security implications."""
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"""Please optimize repository mirrors:
 
@@ -1946,7 +1965,7 @@ Be detailed and provide specific mirror URLs and configuration commands."""
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=create_platform_error_message("system_health_check prompt")
                         )
@@ -1959,7 +1978,7 @@ Be detailed and provide specific mirror URLs and configuration commands."""
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text="""Please perform a comprehensive system health diagnostic:
 
