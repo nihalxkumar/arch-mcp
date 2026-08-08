@@ -8,7 +8,7 @@ for the Arch Linux MCP server.
 
 import logging
 import json
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from mcp.server import Server
@@ -34,6 +34,8 @@ from . import (
     get_pkgbuild,
     audit_package_security,
     install_package_secure,
+    analyze_package_metadata_risk,
+    analyze_pkgbuild_safety,
     # Pacman functions
     get_official_package_info,
     check_updates_dry_run,
@@ -74,7 +76,14 @@ from . import (
     run_command,
 )
 
+from .utils import create_error_response
 from .groups import manage_groups
+from .validation import (
+    ValidationError,
+    validate_group_name,
+    validate_package_name,
+    validate_package_names,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -697,13 +706,18 @@ async def list_tools() -> list[Tool]:
         
         Tool(
             name="install_package_secure",
-            description="[LIFECYCLE] Install a package with comprehensive security checks. Workflow: 1. Check official repos first (safer) 2. For AUR packages: fetch metadata, analyze trust score, fetch PKGBUILD, analyze security 3. Block installation if critical security issues found 4. Check for AUR helper (paru > yay) 5. Install with --noconfirm if all checks pass. Only works on Arch Linux. Requires sudo access and paru/yay for AUR packages.",
+            description="[LIFECYCLE] Install an official-repository package, or audit an AUR package. Defaults to a dry run: with confirm=false (the default) it reports what it would do and the exact command, and installs nothing. Pass confirm=true only after the user has agreed to the specific package. AUR packages are NEVER installed by this tool at any confirm value - it returns the audit plus the command for the user to run under their AUR helper's own diff review, because a PKGBUILD scan cannot see the .install script, the upstream sources, or anything the build fetches while it runs. Only works on Arch Linux. Prompts for the sudo password via a graphical askpass helper.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "package_name": {
                         "type": "string",
                         "description": "Name of package to install (checks official repos first, then AUR)"
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to actually install an official-repository package. Default false performs a dry run. Ignored for AUR packages, which are never installed automatically.",
+                        "default": False
                     }
                 },
                 "required": ["package_name"]
@@ -743,7 +757,7 @@ async def list_tools() -> list[Tool]:
         # Package Removal
         Tool(
             name="remove_packages",
-            description="[LIFECYCLE] Unified tool for removing packages (single or multiple). Accepts either a single package name or a list of packages. Supports removal with dependencies and forced removal. Only works on Arch Linux. Requires sudo access. Examples: packages='firefox', remove_dependencies=true → removes Firefox with its dependencies; packages=['pkg1', 'pkg2', 'pkg3'] → batch removal of multiple packages; packages='lib', force=true → force removal ignoring dependencies (dangerous!).",
+            description="[LIFECYCLE] Unified tool for removing packages (single or multiple). Accepts either a single package name or a list of packages. Defaults to a dry run: with confirm=false (the default) it returns the exact command it would run and removes nothing. Pass confirm=true only after the user has agreed to the specific packages. Only works on Arch Linux. Prompts for the sudo password via a graphical askpass helper. Examples: packages='firefox' → shows the command; packages='firefox', confirm=true → removes it; packages=['pkg1','pkg2'], remove_dependencies=true, confirm=true → batch removal with unused dependencies.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -759,9 +773,9 @@ async def list_tools() -> list[Tool]:
                         "description": "Remove packages and their dependencies (pacman -Rs). Default: false",
                         "default": False
                     },
-                    "force": {
+                    "confirm": {
                         "type": "boolean",
-                        "description": "Force removal ignoring dependencies (pacman -Rdd). Use with caution! Default: false",
+                        "description": "Must be true to actually remove anything. Default false performs a dry run and reports the command.",
                         "default": False
                     }
                 },
@@ -773,7 +787,7 @@ async def list_tools() -> list[Tool]:
         # Orphan Package Management
         Tool(
             name="manage_orphans",
-            description="[MAINTENANCE] Unified tool for managing orphaned packages (dependencies no longer required). Supports two actions: 'list' (show orphaned packages) and 'remove' (remove orphaned packages). Only works on Arch Linux. Requires sudo access for removal. Examples: action='list' → shows all orphaned packages with disk usage; action='remove', dry_run=true → preview what would be removed; action='remove', dry_run=false, exclude=['pkg1'] → remove all orphans except 'pkg1'.",
+            description="[MAINTENANCE] Unified tool for managing orphaned packages (dependencies no longer required). Supports two actions: 'list' (show orphaned packages) and 'remove' (remove orphaned packages). Removing requires BOTH dry_run=false AND confirm=true; the package set is computed at call time, so run the dry run first, show the user the list, and only then confirm. Only works on Arch Linux. Prompts for the sudo password via a graphical askpass helper. Examples: action='list' → shows all orphaned packages with disk usage; action='remove' → previews what would be removed; action='remove', dry_run=false, confirm=true, exclude=['pkg1'] → removes all orphans except 'pkg1'.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -791,11 +805,16 @@ async def list_tools() -> list[Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "List of package names to exclude from removal (only for remove action)"
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true, together with dry_run=false, to actually remove orphans. Default false.",
+                        "default": False
                     }
                 },
                 "required": ["action"]
             },
-            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)  # Mixed: list is read-only, remove is destructive
+            annotations=ToolAnnotations(destructiveHint=True)  # 'remove' can delete packages
         ),
 
         # File Ownership Query (Consolidated)
@@ -888,7 +907,7 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["action"]
             },
-            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)  # Mixed: list is read-only, marking is destructive
+            annotations=ToolAnnotations(destructiveHint=True)  # marking changes the pacman database as root
         ),
 
         # System Diagnostic Tools
@@ -1082,6 +1101,51 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# Tool arguments that reach a subprocess argument vector, mapped to their validator.
+# Arguments not listed here never become argv entries.
+_ARGUMENT_VALIDATORS = {
+    "package_name": validate_package_name,
+    "group_name": validate_group_name,
+}
+
+
+def _validate_tool_arguments(arguments: dict[str, Any]) -> Optional[dict]:
+    """
+    Validate tool arguments that end up in a command's argument vector.
+
+    Args:
+        arguments: Raw tool arguments from the MCP client.
+
+    Returns:
+        A structured error response if any argument is invalid, otherwise None.
+    """
+    if not arguments:
+        return None
+
+    for key, validator in _ARGUMENT_VALIDATORS.items():
+        value = arguments.get(key)
+        if value is None:
+            continue
+        try:
+            validator(value)
+        except ValidationError as e:
+            logger.warning(f"Rejected tool argument {key}={value!r}: {e}")
+            return create_error_response("ValidationError", f"{key}: {e}")
+
+    # 'packages' accepts either a single name or a list of them.
+    packages = arguments.get("packages")
+    if packages is not None:
+        try:
+            validate_package_names(
+                [packages] if isinstance(packages, str) else packages
+            )
+        except (ValidationError, TypeError) as e:
+            logger.warning(f"Rejected tool argument packages={packages!r}: {e}")
+            return create_error_response("ValidationError", f"packages: {e}")
+
+    return None
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | ImageContent | EmbeddedResource]:
     """
@@ -1098,7 +1162,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         ValueError: If tool name is unknown
     """
     logger.info(f"Calling tool: {name} with args: {arguments}")
-    
+
+    # Second validation layer. The individual modules validate their own inputs,
+    # but doing it here as well means a tool added later cannot reach a
+    # subprocess with an unchecked name just because its handler forgot to call
+    # the validator.
+    validation_error = _validate_tool_arguments(arguments)
+    if validation_error:
+        return [TextContent(type="text", text=json.dumps(validation_error, indent=2))]
+
     if name == "search_archwiki":
         query = arguments["query"]
         limit = arguments.get("limit", 10)
@@ -1129,7 +1201,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
             return [TextContent(type="text", text=create_platform_error_message("install_package_secure"))]
         
         package_name = arguments["package_name"]
-        result = await install_package_secure(package_name)
+        confirm = arguments.get("confirm", False)
+        result = await install_package_secure(package_name, confirm)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
     elif name == "audit_package_security":
@@ -1147,8 +1220,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
         packages = arguments["packages"]
         remove_dependencies = arguments.get("remove_dependencies", False)
-        force = arguments.get("force", False)
-        result = await remove_packages(packages, remove_dependencies, force)
+        confirm = arguments.get("confirm", False)
+        result = await remove_packages(packages, remove_dependencies, confirm)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Orphan Package Management
@@ -1159,7 +1232,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         action = arguments["action"]
         dry_run = arguments.get("dry_run", True)
         exclude = arguments.get("exclude", None)
-        result = await manage_orphans(action, dry_run, exclude)
+        confirm = arguments.get("confirm", False)
+        result = await manage_orphans(action, dry_run, exclude, confirm)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # File Ownership Query
@@ -1420,7 +1494,7 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
         messages = [
             PromptMessage(
                 role="user",
-                content=PromptMessage.TextContent(
+                content=TextContent(
                     type="text",
                     text=f"I'm experiencing this error: {error_message}\n\nContext: {context}\n\nPlease help me troubleshoot this issue using Arch Linux knowledge."
                 )
@@ -1436,7 +1510,7 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             messages.append(
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=wiki_content
                     )
@@ -1456,44 +1530,85 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             package_info = await get_aur_info(package_name)
             pkgbuild_content = await get_pkgbuild(package_name)
             
+            # get_aur_info wraps its payload in the AUR safety warning, so the
+            # metadata sits under "data". analyze_package_metadata_risk reads
+            # votes, popularity and maintainer from the top level, so handing it
+            # the wrapper reports every package as having zero votes and no
+            # maintainer -- turning a well-maintained package into a HIGH RISK
+            # verdict. install_package_secure unwraps the same way.
+            metadata = package_info.get("data", package_info)
+
             # Analyze both metadata and PKGBUILD
-            metadata_risk = analyze_package_metadata_risk(package_info)
+            metadata_risk = analyze_package_metadata_risk(metadata)
             pkgbuild_safety = analyze_pkgbuild_safety(pkgbuild_content)
             
+            # Findings come back in three severity buckets. There is no combined
+            # "findings" key, and no boolean verdict: this is a static scan, so
+            # it reports what it matched and never certifies a package.
+            red_flags = pkgbuild_safety.get('red_flags', [])
+            warnings = pkgbuild_safety.get('warnings', [])
+            info = pkgbuild_safety.get('info', [])
+
+            # Both lists hold dicts, not strings; joining them directly raises.
+            risk_factors = "; ".join(
+                f.get('issue', '') for f in metadata_risk.get('risk_factors', [])
+            ) or "none recorded"
+            trust_indicators = "; ".join(
+                t.get('indicator', '') for t in metadata_risk.get('trust_indicators', [])
+            ) or "none recorded"
+
             audit_summary = f"""
 # Security Audit Report for {package_name}
 
 ## Package Metadata Analysis
 - **Trust Score**: {metadata_risk.get('trust_score', 'N/A')}/100
-- **Risk Factors**: {', '.join(metadata_risk.get('risk_factors', []))}
-- **Trust Indicators**: {', '.join(metadata_risk.get('trust_indicators', []))}
+- **Risk Factors**: {risk_factors}
+- **Trust Indicators**: {trust_indicators}
 
-## PKGBUILD Security Analysis
+## PKGBUILD Scan
 - **Risk Score**: {pkgbuild_safety.get('risk_score', 'N/A')}/100
-- **Security Issues Found**: {len(pkgbuild_safety.get('findings', []))}
-- **Critical Issues**: {len([f for f in pkgbuild_safety.get('findings', []) if f.get('severity') == 'critical'])}
+- **Critical patterns matched**: {len(red_flags)}
+- **Suspicious patterns matched**: {len(warnings)}
+- **Informational matches**: {len(info)}
+
+{pkgbuild_safety.get('recommendation', '')}
+
+**What this scan does not cover**: {pkgbuild_safety.get('limitations', '')}
 
 ## Recommendations
 """
-            
-            if metadata_risk.get('trust_score', 0) < 50 or pkgbuild_safety.get('risk_score', 0) > 70:
-                audit_summary += "⚠️ **HIGH RISK** - Consider finding an alternative package or reviewing the source code manually.\n"
-            elif metadata_risk.get('trust_score', 0) < 70 or pkgbuild_safety.get('risk_score', 0) > 50:
-                audit_summary += "⚠️ **MEDIUM RISK** - Proceed with caution and review the findings below.\n"
+
+            if red_flags or metadata_risk.get('trust_score', 0) < 50:
+                audit_summary += (
+                    "⚠️ **Do not install without reading the recipe yourself.** Critical "
+                    "patterns matched, or the package's metadata gives little reason to "
+                    "trust it. Consider an alternative package.\n"
+                )
+            elif warnings or metadata_risk.get('trust_score', 0) < 70:
+                audit_summary += (
+                    "⚠️ **Read the PKGBUILD and .install files before installing.** "
+                    "Suspicious patterns matched, or the metadata is weak.\n"
+                )
             else:
-                audit_summary += "✅ **LOW RISK** - Package appears safe to install.\n"
-            
+                audit_summary += (
+                    "No known-bad patterns matched and the metadata looks ordinary. "
+                    "**This is not evidence that the package is safe** - the scan cannot "
+                    "see the .install script, the upstream sources, or anything the build "
+                    "fetches while it runs. Review the recipe yourself and install it in "
+                    "your own terminal, with your AUR helper's diff review enabled.\n"
+                )
+
             messages = [
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"Please audit the AUR package '{package_name}' for security issues before installation."
                     )
                 ),
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=audit_summary
                     )
@@ -1511,7 +1626,7 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=f"Error auditing package '{package_name}': {str(e)}"
                         )
@@ -1558,14 +1673,18 @@ sudo pacman -S {package_name}
             else:
                 # Check AUR
                 aur_info = await get_aur_info(package_name)
-                if aur_info.get("found"):
+                # get_aur_info returns its payload under "data", and neither
+                # shape carries a "found" key -- so this check was always false
+                # and every AUR package was reported as not existing.
+                aur_pkg = aur_info.get("data", aur_info)
+                if not aur_info.get("error") and aur_pkg.get("name"):
                     analysis = f"""
 # Dependency Analysis for {package_name} (AUR Package)
 
 ## AUR Package Information
-- **Maintainer**: {aur_info.get('maintainer', 'Unknown')}
-- **Last Updated**: {aur_info.get('last_modified', 'Unknown')}
-- **Votes**: {aur_info.get('votes', 'Unknown')}
+- **Maintainer**: {aur_pkg.get('maintainer') or 'Orphaned'}
+- **Last Updated**: {aur_pkg.get('last_modified', 'Unknown')}
+- **Votes**: {aur_pkg.get('votes', 'Unknown')}
 
 ## Installation Considerations
 1. **Security Check**: Run a security audit before installation
@@ -1597,14 +1716,14 @@ paru -S {package_name}  # or yay -S {package_name}
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"Please analyze the dependencies for the package '{package_name}' and suggest the best installation approach."
                     )
                 ),
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=analysis
                     )
@@ -1619,7 +1738,7 @@ paru -S {package_name}  # or yay -S {package_name}
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=create_platform_error_message("safe_system_update prompt")
                         )
@@ -1688,7 +1807,7 @@ paru -S {package_name}  # or yay -S {package_name}
                     messages=[
                         PromptMessage(
                             role="assistant",
-                            content=PromptMessage.TextContent(
+                            content=TextContent(
                                 type="text",
                                 text=analysis
                             )
@@ -1752,14 +1871,14 @@ paru -S {package_name}  # or yay -S {package_name}
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text="Check if my system is ready for a safe update"
                     )
                 ),
                 PromptMessage(
                     role="assistant",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=analysis
                     )
@@ -1774,7 +1893,7 @@ paru -S {package_name}  # or yay -S {package_name}
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=create_platform_error_message("cleanup_system prompt")
                         )
@@ -1789,7 +1908,7 @@ paru -S {package_name}  # or yay -S {package_name}
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"""Please perform a comprehensive system cleanup:
 
@@ -1833,7 +1952,7 @@ Be thorough and explain each step."""
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text="Error: package_name argument is required"
                         )
@@ -1846,7 +1965,7 @@ Be thorough and explain each step."""
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"""Please investigate the package '{package_name}' thoroughly before installation:
 
@@ -1904,7 +2023,7 @@ Be comprehensive and explain security implications."""
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text=f"""Please optimize repository mirrors:
 
@@ -1946,7 +2065,7 @@ Be detailed and provide specific mirror URLs and configuration commands."""
                 messages=[
                     PromptMessage(
                         role="assistant",
-                        content=PromptMessage.TextContent(
+                        content=TextContent(
                             type="text",
                             text=create_platform_error_message("system_health_check prompt")
                         )
@@ -1959,7 +2078,7 @@ Be detailed and provide specific mirror URLs and configuration commands."""
             messages=[
                 PromptMessage(
                     role="user",
-                    content=PromptMessage.TextContent(
+                    content=TextContent(
                         type="text",
                         text="""Please perform a comprehensive system health diagnostic:
 

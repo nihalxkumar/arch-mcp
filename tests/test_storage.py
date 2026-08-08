@@ -11,11 +11,12 @@ async def test_analyze_storage_disk_usage():
     assert "disk_usage" in result or "error" in result
 
 
-@pytest.mark.skipif(not True, reason="Arch Linux only")
 async def test_analyze_storage_cache_stats():
     """Test pacman cache stats analysis."""
     result = await analyze_storage(action="cache_stats")
-    assert "cache_stats" in result or "error" in result
+    # analyze_storage forwards get_pacman_cache_stats' payload unchanged; the
+    # fields are returned flat, not under a "cache_stats" key.
+    assert "cache_dir" in result or "error" in result
 
 
 async def test_analyze_storage_invalid_action():

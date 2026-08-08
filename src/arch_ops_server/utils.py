@@ -8,6 +8,9 @@ import asyncio
 import logging
 import os
 import platform
+import re
+import shlex
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -55,95 +58,235 @@ def is_arch_linux() -> bool:
 IS_ARCH = is_arch_linux()
 
 
+# Graphical password helpers, in the order they are tried.
+# Askpass helpers that are normally on PATH, across desktops. No desktop
+# environment is assumed: whichever is installed gets used.
+ASKPASS_HELPERS = (
+    "ssh-askpass",              # Debian/Ubuntu alternatives, generic
+    "ksshaskpass",              # KDE / Plasma
+    "ssh-askpass-gnome",        # GNOME
+    "lxqt-openssh-askpass",     # LXQt
+    "ssh-askpass-fullscreen",
+    "x11-ssh-askpass",          # plain X11
+    "qt4-ssh-askpass",
+)
+
+# Several distributions install their helper outside PATH, so shutil.which
+# alone would report "not installed" on a perfectly working desktop.
+ASKPASS_PATHS = (
+    "/usr/lib/seahorse/ssh-askpass",            # GNOME/Seahorse, Arch
+    "/usr/libexec/seahorse/ssh-askpass",        # GNOME/Seahorse, Fedora
+    "/usr/libexec/openssh/gnome-ssh-askpass",   # Fedora
+    "/usr/lib/openssh/gnome-ssh-askpass",       # Debian/Ubuntu
+    "/usr/lib/ssh/x11-ssh-askpass",             # Arch x11-ssh-askpass
+    "/usr/lib/ssh/ssh-askpass",
+)
+
+
+def _is_executable(path: str) -> bool:
+    """Return True if path is an existing executable file."""
+    return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def _askpass_from_sudo_conf() -> Optional[str]:
+    """
+    Read the askpass helper configured in /etc/sudo.conf, if any.
+
+    sudo itself supports `Path askpass <program>`, so an administrator may have
+    already chosen a helper. Honour it rather than second-guessing.
+
+    Returns:
+        The configured path, or None if unset or unreadable.
+    """
+    try:
+        with open("/etc/sudo.conf", "r") as f:
+            for line in f:
+                match = re.match(r"^\s*Path\s+askpass\s+(\S+)", line, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+    except OSError:
+        pass
+    return None
+
+
+def find_askpass() -> Optional[str]:
+    """
+    Locate a helper sudo can use to prompt for a password.
+
+    The server has no controlling terminal it can safely prompt on -- for the
+    STDIO transport, stdin carries the MCP protocol -- so sudo needs a separate
+    helper. The user types their password into their own session; it never
+    passes through this process.
+
+    No desktop environment is assumed. The search order is: an explicitly
+    configured SUDO_ASKPASS, then /etc/sudo.conf, then the helpers that ship
+    with each major desktop, on PATH and in the lib directories distributions
+    put them in.
+
+    Returns:
+        Path to an executable askpass helper, or None if no graphical session
+        is available or no helper is installed.
+    """
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        logger.debug("No graphical session; askpass unavailable")
+        return None
+
+    configured = os.environ.get("SUDO_ASKPASS")
+    if _is_executable(configured):
+        logger.debug(f"Using configured SUDO_ASKPASS: {configured}")
+        return configured
+
+    from_conf = _askpass_from_sudo_conf()
+    if _is_executable(from_conf):
+        logger.debug(f"Using askpass from /etc/sudo.conf: {from_conf}")
+        return from_conf
+
+    for helper in ASKPASS_HELPERS:
+        path = shutil.which(helper)
+        if path:
+            logger.debug(f"Found askpass helper on PATH: {path}")
+            return path
+
+    for path in ASKPASS_PATHS:
+        if _is_executable(path):
+            logger.debug(f"Found askpass helper: {path}")
+            return path
+
+    logger.debug("No askpass helper installed")
+    return None
+
+
+def _is_sudo_auth_failure(stderr: str) -> bool:
+    """
+    Decide whether sudo failed for want of a password rather than on the command.
+
+    Args:
+        stderr: Captured standard error from the sudo invocation.
+
+    Returns:
+        True if sudo reported that it could not authenticate the user.
+    """
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in (
+        "a password is required",
+        "no askpass program",
+        "a terminal is required",
+        "no tty present",
+        "sorry, a password is required",
+    ))
+
+
+def format_command(cmd: list[str]) -> str:
+    """
+    Render an argument vector as a copy-pasteable shell command.
+
+    Args:
+        cmd: Command and arguments as a list.
+
+    Returns:
+        A quoted command string safe to show the user.
+    """
+    return shlex.join(cmd)
+
+
 async def run_command(
     cmd: list[str],
     timeout: int = 10,
-    check: bool = True,
-    skip_sudo_check: bool = False
+    check: bool = True
 ) -> tuple[int, str, str]:
     """
     Execute a command asynchronously with timeout protection.
-    
-    Note: For sudo commands, stdin is properly connected to allow password input
-    if passwordless sudo is not configured.
-    
+
+    Privileged commands are escalated through sudo's askpass helper, so the
+    password is entered by the user in their own graphical session. This process
+    never reads, relays or stores it, and no passwordless sudo rule is required.
+    The child's stdin is always closed: nothing here writes a password to a pipe.
+
     Args:
         cmd: Command and arguments as list
         timeout: Timeout in seconds (default: 10)
         check: If True, raise exception on non-zero exit code
-        skip_sudo_check: If True, skip the early sudo password check (for testing)
-    
+
     Returns:
         Tuple of (exit_code, stdout, stderr)
-    
+
     Raises:
         asyncio.TimeoutError: If command exceeds timeout
         RuntimeError: If check=True and command fails
     """
-    logger.debug(f"Executing command: {' '.join(cmd)}")
-    
-    # Check if this is a sudo command and if password is cached
-    is_sudo_command = cmd and cmd[0] == "sudo"
-    if is_sudo_command and not skip_sudo_check:
-        # Test if sudo password is cached (non-interactive mode)
-        test_cmd = ["sudo", "-n", "true"]
-        try:
-            test_process = await asyncio.create_subprocess_exec(
-                *test_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await test_process.communicate()
-            password_cached = test_process.returncode == 0
-            logger.debug(f"Sudo password cached: {password_cached}")
-            
-            if not password_cached:
-                logger.warning("Sudo password is required but not cached. "
-                              "Please run 'sudo pacman -S <package>' manually in the terminal.")
-                return (
-                    1,
-                    "",
-                    "Sudo password required. Please configure passwordless sudo for pacman/paru, "
-                    "or run the installation command manually in your terminal."
-                )
-        except Exception as e:
-            logger.warning(f"Could not check sudo status: {e}")
-            password_cached = False
-    else:
-        password_cached = True
-    
+    logger.debug(f"Executing command: {format_command(cmd)}")
+
+    env = os.environ.copy()
+
+    # Route sudo through an askpass helper. There is no terminal to prompt on,
+    # so without one sudo would block or fall back to a NOPASSWD rule.
+    needs_sudo_fallback_message = False
+    # Kept before the rewrite below, so the "run this yourself" message shows the
+    # command the caller asked for rather than the flags added here.
+    original_cmd = list(cmd)
+    if cmd and cmd[0] == "sudo":
+        askpass = find_askpass()
+        if askpass:
+            env["SUDO_ASKPASS"] = askpass
+            # -A tells sudo to use SUDO_ASKPASS rather than looking for a terminal.
+            if "-A" not in cmd:
+                cmd = [cmd[0], "-A"] + list(cmd[1:])
+        else:
+            # No helper, but sudo may not need to ask: the user may have a valid
+            # cached timestamp, or an authorisation rule they chose themselves.
+            # -n makes sudo either proceed without prompting or fail at once,
+            # so this can never block on a terminal we do not have.
+            if "-n" not in cmd:
+                cmd = [cmd[0], "-n"] + list(cmd[1:])
+            needs_sudo_fallback_message = True
+            logger.debug("No askpass helper; attempting sudo non-interactively")
+
     try:
-        # Attach stdin to subprocess for commands that might need input
-        # Use asyncio.subprocess.PIPE to allow stdin interaction
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.PIPE if is_sudo_command else None
+            stdin=asyncio.subprocess.DEVNULL,
+            env=env
         )
-        
-        # Communicate with the process
-        # For sudo commands, this allows password input if needed
+
         stdout, stderr = await asyncio.wait_for(
             process.communicate(),
             timeout=timeout
         )
-        
+
         exit_code = process.returncode
         stdout_str = stdout.decode('utf-8', errors='replace') if stdout else ""
         stderr_str = stderr.decode('utf-8', errors='replace') if stderr else ""
-        
+
         logger.debug(f"Command exit code: {exit_code}")
-        
+
+        # Distinguish "sudo could not ask for a password" from a real command
+        # failure, and tell the user how to proceed without weakening sudo.
+        if needs_sudo_fallback_message and exit_code != 0 and _is_sudo_auth_failure(stderr_str):
+            logger.warning("sudo needs a password but no askpass helper is available")
+            return 1, "", (
+                "This command needs root, but there is no password prompt available: "
+                "no askpass helper is installed and your sudo credentials are not "
+                "currently valid.\n\n"
+                "Run it yourself in a terminal:\n\n"
+                f"    {format_command(original_cmd)}\n\n"
+                "Or install an askpass helper for your desktop and retry -- for "
+                "example seahorse on GNOME, ksshaskpass on KDE, or "
+                "lxqt-openssh-askpass on LXQt.\n\n"
+                "Do not add a passwordless sudo rule to work around this: it would "
+                "let any tool call reach root with no confirmation."
+            )
+
         if check and exit_code != 0:
             raise RuntimeError(
                 f"Command failed with exit code {exit_code}: {stderr_str}"
             )
-        
+
         return exit_code, stdout_str, stderr_str
-        
+
     except asyncio.TimeoutError:
-        logger.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+        logger.error(f"Command timed out after {timeout}s: {format_command(cmd)}")
         raise
     except Exception as e:
         logger.error(f"Command execution failed: {e}")
@@ -279,18 +422,16 @@ def _get_wiki_suggestions_for_error(error_type: str, message: str) -> list[str]:
 def check_command_exists(command: str) -> bool:
     """
     Check if a command exists in the system PATH.
-    
+
     Args:
         command: Command name to check
-    
+
     Returns:
         bool: True if command exists, False otherwise
     """
-    try:
-        result = os.system(f"which {command} > /dev/null 2>&1")
-        return result == 0
-    except Exception:
-        return False
+    # shutil.which does not involve a shell, so a command name containing shell
+    # metacharacters cannot be executed here.
+    return shutil.which(command) is not None
 
 
 def get_aur_helper() -> Optional[str]:

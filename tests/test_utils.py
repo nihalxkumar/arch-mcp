@@ -4,6 +4,7 @@ Tests for arch_ops_server.utils module.
 """
 
 import asyncio
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +15,7 @@ from arch_ops_server.utils import (
     add_aur_warning,
     check_command_exists,
     create_error_response,
+    find_askpass,
     get_aur_helper,
     is_arch_linux,
     run_command,
@@ -85,7 +87,7 @@ class TestCommandExecution:
             "asyncio.create_subprocess_exec", new=mock_subprocess_success
         ):
             exit_code, stdout, stderr = await run_command(
-                ["echo", "hello"], skip_sudo_check=True
+                ["echo", "hello"]
             )
 
             assert exit_code == 0
@@ -99,7 +101,7 @@ class TestCommandExecution:
             "asyncio.create_subprocess_exec", new=mock_subprocess_failure
         ):
             with pytest.raises(RuntimeError, match="Command failed with exit code 1"):
-                await run_command(["false"], check=True, skip_sudo_check=True)
+                await run_command(["false"], check=True)
 
     @pytest.mark.asyncio
     async def test_run_command_failure_without_check(self, mock_subprocess_failure):
@@ -108,7 +110,7 @@ class TestCommandExecution:
             "asyncio.create_subprocess_exec", new=mock_subprocess_failure
         ):
             exit_code, stdout, stderr = await run_command(
-                ["false"], check=False, skip_sudo_check=True
+                ["false"], check=False
             )
 
             assert exit_code == 1
@@ -131,33 +133,148 @@ class TestCommandExecution:
         with patch("asyncio.create_subprocess_exec", new=_create_slow_subprocess):
             with pytest.raises(asyncio.TimeoutError):
                 await run_command(
-                    ["sleep", "10"], timeout=0.1, skip_sudo_check=True
+                    ["sleep", "10"], timeout=0.1
                 )
 
     @pytest.mark.asyncio
-    async def test_run_command_sudo_password_not_cached(self):
-        """Test sudo command when password is not cached."""
-        # Mock sudo -n true to fail (password not cached)
-        async def _mock_communicate():
-            return (b"", b"sudo: a password is required")
+    async def test_run_command_without_askpass_tries_non_interactively(
+        self, mock_subprocess_success
+    ):
+        """
+        With no askpass helper, sudo is still attempted with -n.
 
-        mock_test_process = MagicMock()
-        mock_test_process.returncode = 1
-        mock_test_process.communicate = _mock_communicate
-
-        call_count = 0
+        A user may have a valid sudo timestamp or an authorisation rule of
+        their own; refusing outright would break them. -n guarantees sudo
+        never blocks waiting for a terminal we do not have.
+        """
+        captured = {}
 
         async def _create_subprocess(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            return mock_test_process
+            captured["argv"] = list(args)
+            return await mock_subprocess_success(*args, **kwargs)
 
-        with patch("asyncio.create_subprocess_exec", new=_create_subprocess):
-            exit_code, stdout, stderr = await run_command(["sudo", "pacman", "-S", "test"])
+        with patch("arch_ops_server.utils.find_askpass", return_value=None):
+            with patch("asyncio.create_subprocess_exec", new=_create_subprocess):
+                exit_code, _, _ = await run_command(["sudo", "pacman", "-S", "test"])
 
-            assert exit_code == 1
-            assert "Sudo password required" in stderr
-            assert call_count == 1  # Only the test command, not the actual command
+        assert exit_code == 0
+        assert captured["argv"][:2] == ["sudo", "-n"]
+
+    @pytest.mark.asyncio
+    async def test_run_command_reports_when_password_needed(self):
+        """When sudo cannot authenticate, explain rather than leak its error."""
+        async def _create_subprocess(*args, **kwargs):
+            process = MagicMock()
+            process.returncode = 1
+
+            async def _communicate():
+                return (b"", b"sudo: a password is required")
+
+            process.communicate = _communicate
+            return process
+
+        with patch("arch_ops_server.utils.find_askpass", return_value=None):
+            with patch("asyncio.create_subprocess_exec", new=_create_subprocess):
+                exit_code, _, stderr = await run_command(
+                    ["sudo", "pacman", "-S", "test"], check=False
+                )
+
+        assert exit_code == 1
+        # The command to run by hand, without the internal -n flag.
+        assert "sudo pacman -S test" in stderr
+        # Desktop-neutral advice, and no suggestion to weaken sudo.
+        assert "seahorse" in stderr and "ksshaskpass" in stderr
+        assert "Do not add a passwordless sudo rule" in stderr
+
+
+class TestAskpassDiscovery:
+    """Helper discovery must not assume any particular desktop."""
+
+    def test_no_graphical_session_means_no_helper(self):
+        with patch.dict(os.environ, {}, clear=True):
+            assert find_askpass() is None
+
+    def test_explicit_sudo_askpass_wins(self, tmp_path):
+        helper = tmp_path / "my-askpass"
+        helper.write_text("#!/bin/sh\n")
+        helper.chmod(0o755)
+
+        with patch.dict(os.environ, {"DISPLAY": ":0", "SUDO_ASKPASS": str(helper)}):
+            assert find_askpass() == str(helper)
+
+    def test_finds_helper_on_path(self):
+        with patch.dict(os.environ, {"DISPLAY": ":0"}, clear=True):
+            with patch("shutil.which", side_effect=lambda n: "/usr/bin/" + n
+                       if n == "ssh-askpass-gnome" else None):
+                assert find_askpass() == "/usr/bin/ssh-askpass-gnome"
+
+    def test_finds_helper_installed_outside_path(self):
+        """GNOME/Seahorse ships outside PATH; which() alone would miss it."""
+        gnome_helper = "/usr/lib/seahorse/ssh-askpass"
+
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-0"}, clear=True):
+            with patch("shutil.which", return_value=None):
+                with patch("arch_ops_server.utils._is_executable",
+                           side_effect=lambda p: p == gnome_helper):
+                    assert find_askpass() == gnome_helper
+
+    def test_honours_sudo_conf(self, tmp_path):
+        configured = "/opt/custom/askpass"
+
+        with patch.dict(os.environ, {"DISPLAY": ":0"}, clear=True):
+            with patch("arch_ops_server.utils._askpass_from_sudo_conf",
+                       return_value=configured):
+                with patch("arch_ops_server.utils._is_executable",
+                           side_effect=lambda p: p == configured):
+                    assert find_askpass() == configured
+
+    def test_helper_list_is_not_kde_only(self):
+        """Regression guard: the search must cover the major desktops."""
+        from arch_ops_server.utils import ASKPASS_HELPERS, ASKPASS_PATHS
+
+        combined = " ".join(ASKPASS_HELPERS) + " " + " ".join(ASKPASS_PATHS)
+        assert "ksshaskpass" in combined          # KDE
+        assert "seahorse" in combined             # GNOME
+        assert "gnome-ssh-askpass" in combined    # GNOME, Debian/Fedora layout
+        assert "lxqt-openssh-askpass" in combined  # LXQt
+        assert "x11-ssh-askpass" in combined      # plain X11
+
+    @pytest.mark.asyncio
+    async def test_run_command_sudo_uses_askpass(self, mock_subprocess_success):
+        """A sudo command gets -A and SUDO_ASKPASS pointing at the helper."""
+        captured = {}
+
+        async def _create_subprocess(*args, **kwargs):
+            captured["argv"] = list(args)
+            captured["env"] = kwargs.get("env") or {}
+            captured["stdin"] = kwargs.get("stdin")
+            return await mock_subprocess_success(*args, **kwargs)
+
+        with patch("arch_ops_server.utils.find_askpass", return_value="/usr/bin/ksshaskpass"):
+            with patch("asyncio.create_subprocess_exec", new=_create_subprocess):
+                exit_code, _, _ = await run_command(["sudo", "pacman", "-S", "test"])
+
+        assert exit_code == 0
+        assert captured["argv"][:2] == ["sudo", "-A"]
+        assert captured["env"]["SUDO_ASKPASS"] == "/usr/bin/ksshaskpass"
+        # stdin is closed: no password is ever written to the child.
+        assert captured["stdin"] is asyncio.subprocess.DEVNULL
+
+    @pytest.mark.asyncio
+    async def test_run_command_non_sudo_untouched(self, mock_subprocess_success):
+        """Non-privileged commands are not rewritten and need no askpass."""
+        captured = {}
+
+        async def _create_subprocess(*args, **kwargs):
+            captured["argv"] = list(args)
+            return await mock_subprocess_success(*args, **kwargs)
+
+        with patch("arch_ops_server.utils.find_askpass", return_value=None):
+            with patch("asyncio.create_subprocess_exec", new=_create_subprocess):
+                exit_code, _, _ = await run_command(["pacman", "-Q"])
+
+        assert exit_code == 0
+        assert captured["argv"] == ["pacman", "-Q"]
 
 
 class TestErrorHandling:
@@ -250,21 +367,21 @@ class TestCommandExistence:
 
     def test_check_command_exists_found(self):
         """Test detecting an existing command."""
-        with patch("os.system", return_value=0):
+        with patch("shutil.which", return_value="/usr/bin/ls"):
             result = check_command_exists("ls")
             assert result is True
 
     def test_check_command_exists_not_found(self):
         """Test detecting a missing command."""
-        with patch("os.system", return_value=1):
+        with patch("shutil.which", return_value=None):
             result = check_command_exists("nonexistent_command_xyz")
             assert result is False
 
-    def test_check_command_exists_exception(self):
-        """Test handling exceptions during command check."""
-        with patch("os.system", side_effect=Exception("Test error")):
-            result = check_command_exists("test")
-            assert result is False
+    def test_check_command_exists_uses_no_shell(self):
+        """A command name with shell metacharacters must not be executed."""
+        with patch("os.system") as mock_system:
+            assert check_command_exists("x; touch /tmp/pwned") is False
+            mock_system.assert_not_called()
 
 
 class TestAURHelper:

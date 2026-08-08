@@ -7,20 +7,49 @@ HTTP-based MCP clients, while keeping STDIO transport for Docker MCP Catalog.
 """
 
 import asyncio
+import hmac
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 try:
     from starlette.applications import Starlette
     from starlette.routing import Route
-    from starlette.responses import Response
+    from starlette.responses import Response, JSONResponse
     from starlette.requests import Request
+    from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.middleware.cors import CORSMiddleware
     import uvicorn
     STARLETTE_AVAILABLE = True
 except ImportError:
     STARLETTE_AVAILABLE = False
+    BaseHTTPMiddleware = object
+
+# Configuration read from the environment.
+HOST_ENV = "ARCH_MCP_HOST"
+AUTH_TOKEN_ENV = "ARCH_MCP_AUTH_TOKEN"
+ALLOWED_ORIGINS_ENV = "ARCH_MCP_ALLOWED_ORIGINS"
+# Escape hatch for container platforms that terminate ingress themselves and
+# need the process to listen on all interfaces inside the sandbox.
+ALLOW_INSECURE_BIND_ENV = "ARCH_MCP_ALLOW_INSECURE_BIND"
+
+# Listen on loopback by default. The tools behind this endpoint can run pacman
+# as root, so exposing them to the network must be a deliberate choice.
+DEFAULT_HOST = "127.0.0.1"
+
+
+def get_auth_token() -> str:
+    """
+    Read the configured bearer token.
+
+    Read on each use rather than captured at import time, so that an embedder
+    that sets the variable after importing this module still gets authentication,
+    and so the behaviour is testable.
+
+    Returns:
+        The configured token, or "" if authentication is not configured.
+    """
+    return os.getenv(AUTH_TOKEN_ENV, "")
 
 try:
     from mcp.server.sse import SseServerTransport
@@ -55,6 +84,67 @@ except Exception as e:
     call_tool = None
     read_resource = None
     get_prompt = None
+
+
+class RawASGIEndpoint:
+    """
+    Adapt a raw ASGI handler for use as a Starlette route endpoint.
+
+    Starlette treats a plain function endpoint as ``func(request) -> Response``
+    and awaits whatever it returns. The handlers here write their reply straight
+    to ``send`` and return None, so that wrapper raised
+    ``TypeError: 'NoneType' object is not callable`` -- after the reply had
+    already gone out. A client opening a fresh connection per request (curl)
+    saw a correct response and never noticed; the exception tore the connection
+    down, so any keep-alive client failed on its *second* request.
+
+    Starlette uses a non-function callable as an ASGI app directly, which is
+    what these handlers already are. Method filtering on the Route still
+    applies.
+    """
+
+    def __init__(self, handler):
+        self._handler = handler
+        # Starlette names a route from the endpoint's __name__, falling back to
+        # the class name -- without this, every route would be called
+        # "RawASGIEndpoint".
+        self.__name__ = getattr(handler, "__name__", "raw_asgi_endpoint")
+
+    async def __call__(self, scope, receive, send) -> None:
+        await self._handler(scope, receive, send)
+
+
+class BearerTokenMiddleware(BaseHTTPMiddleware):
+    """Reject requests that do not carry the configured bearer token."""
+
+    def __init__(self, app, token: str):
+        super().__init__(app)
+        # Compared as bytes. Starlette decodes headers as latin-1, so a header
+        # carrying a byte above 0x7f yields a non-ASCII str, and
+        # hmac.compare_digest rejects those with TypeError -- which would turn
+        # an unauthorised request into an unhandled 500.
+        self._token = token.encode("utf-8", "surrogateescape")
+
+    async def dispatch(self, request: "Request", call_next):
+        # Preflight carries no credentials; CORS middleware answers it.
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        header = request.headers.get("authorization", "")
+        scheme, _, presented = header.partition(" ")
+
+        # Constant-time comparison so a wrong token cannot be recovered by
+        # timing the response.
+        if scheme.lower() != "bearer" or not hmac.compare_digest(
+            presented.encode("utf-8", "surrogateescape"), self._token
+        ):
+            logger.warning(
+                f"Rejected unauthenticated request to {request.url.path} "
+                f"from {request.client.host if request.client else 'unknown'}"
+            )
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+        return await call_next(request)
 
 
 async def _handle_direct_mcp_request(request_data: dict) -> dict:
@@ -229,16 +319,19 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                         else:
                             prompt_dict["description"] = ""
                         
-                        # Handle arguments (may be None or empty list)
-                        if hasattr(prompt, 'arguments') and prompt.arguments:
-                            # Ensure arguments is a list
-                            if isinstance(prompt.arguments, list):
-                                prompt_dict["arguments"] = prompt.arguments
-                            else:
-                                # Try to convert to list if it's not
-                                prompt_dict["arguments"] = list(prompt.arguments) if prompt.arguments else []
-                        else:
-                            prompt_dict["arguments"] = []
+                        # Handle arguments (may be None or empty list).
+                        # These are PromptArgument models, not dicts; passing
+                        # them through leaves the whole response unserialisable,
+                        # so reduce each to its primitive fields the way
+                        # tools/list does above.
+                        prompt_dict["arguments"] = [
+                            {
+                                "name": str(argument.name),
+                                "description": str(argument.description or ""),
+                                "required": bool(getattr(argument, "required", False)),
+                            }
+                            for argument in (getattr(prompt, "arguments", None) or [])
+                        ]
                         
                         prompts_list.append(prompt_dict)
                         logger.debug(f"Added prompt: {prompt_dict['name']}")
@@ -498,14 +591,7 @@ async def handle_sse_raw(scope: dict, receive: Any, send: Any) -> None:
         raise
 
 
-async def handle_sse(request: Request) -> None:
-    """
-    Starlette request handler wrapper for SSE endpoint.
-
-    Args:
-        request: Starlette Request object
-    """
-    await handle_sse_raw(request.scope, request.receive, request._send)
+handle_sse = RawASGIEndpoint(handle_sse_raw)
 
 
 async def handle_messages_raw(scope: dict, receive: Any, send: Any) -> None:
@@ -544,30 +630,9 @@ async def handle_messages_raw(scope: dict, receive: Any, send: Any) -> None:
         })
 
 
-async def handle_messages(request: Request) -> None:
-    """
-    Starlette request handler wrapper for messages endpoint.
-
-    Args:
-        request: Starlette Request object
-    """
-    await handle_messages_raw(request.scope, request.receive, request._send)
+handle_messages = RawASGIEndpoint(handle_messages_raw)
 
 
-async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
-    """
-    Raw ASGI handler for /mcp endpoint (Smithery requirement).
-    
-    Smithery expects a single /mcp endpoint that handles:
-    - GET: Establish SSE connection (streamable HTTP)
-    - POST: Send messages
-    - DELETE: Close connection
-    
-    Args:
-        scope: ASGI scope dictionary
-        receive: ASGI receive callable
-        send: ASGI send callable
-    """
 async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
     """
     Raw ASGI handler for /mcp endpoint (Smithery requirement).
@@ -724,14 +789,7 @@ async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
             logger.error(f"Failed to send error response: {send_error}", exc_info=True)
 
 
-async def handle_mcp(request: Request) -> None:
-    """
-    Starlette request handler wrapper for /mcp endpoint.
-    
-    Args:
-        request: Starlette Request object
-    """
-    await handle_mcp_raw(request.scope, request.receive, request._send)
+handle_mcp = RawASGIEndpoint(handle_mcp_raw)
 
 
 def create_app() -> Any:
@@ -760,22 +818,44 @@ def create_app() -> Any:
     # - /sse and /messages: Alternative endpoints for other clients
     routes = [
         Route("/mcp", endpoint=handle_mcp, methods=["GET", "POST", "DELETE"]),
-        Route("/sse", endpoint=handle_sse),
+        # methods is explicit: Starlette defaults it to ["GET"] only for
+        # function endpoints, and these are ASGI apps.
+        Route("/sse", endpoint=handle_sse, methods=["GET"]),
         Route("/messages", endpoint=handle_messages, methods=["POST"]),
     ]
 
     # Create app
     app = Starlette(debug=False, routes=routes)
 
-    # Add CORS middleware for browser-based clients
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
-        allow_headers=["*"],
-        expose_headers=["*"],
-    )
+    # Require a bearer token when one is configured. This server exposes tools
+    # that run pacman as root, so an unauthenticated endpoint is a remote root
+    # surface.
+    auth_token = get_auth_token()
+    if auth_token:
+        app.add_middleware(BearerTokenMiddleware, token=auth_token)
+        logger.info("Bearer token authentication enabled")
+    else:
+        logger.warning(
+            "No %s set: the HTTP endpoint is unauthenticated. Bind it to "
+            "localhost only, or set that variable.", AUTH_TOKEN_ENV
+        )
+
+    # CORS is opt-in by origin. The previous wildcard, combined with
+    # allow_credentials, let any web page the user visited drive this server.
+    allowed_origins = [
+        origin.strip()
+        for origin in os.getenv(ALLOWED_ORIGINS_ENV, "").split(",")
+        if origin.strip()
+    ]
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+            allow_headers=["*"],
+        )
+        logger.info(f"CORS enabled for origins: {allowed_origins}")
 
     logger.info("MCP HTTP Server initialized with SSE transport")
     logger.info("Endpoints: GET/POST/DELETE /mcp (Smithery), GET /sse, POST /messages")
@@ -783,12 +863,16 @@ def create_app() -> Any:
     return app
 
 
-async def run_http_server(host: str = "0.0.0.0", port: int = 8080) -> None:
+async def run_http_server(host: Optional[str] = None, port: int = 8080) -> None:
     """
     Run MCP server with HTTP transport.
 
+    Binds to localhost unless told otherwise. This server can run pacman as
+    root, so listening on every interface by default would have put a root
+    surface on the local network.
+
     Args:
-        host: Host to bind to (default: 0.0.0.0)
+        host: Host to bind to. Defaults to 127.0.0.1, or the HOST env var.
         port: Port to listen on (default: 8080, or PORT env var)
     """
     if not STARLETTE_AVAILABLE:
@@ -798,6 +882,31 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8080) -> None:
 
     # Get port from environment if specified (Smithery sets this)
     port = int(os.getenv("PORT", port))
+
+    if host is None:
+        host = os.getenv(HOST_ENV, DEFAULT_HOST)
+
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        if get_auth_token():
+            logger.warning(
+                f"Binding to {host}: reachable beyond this machine, "
+                "protected by bearer token."
+            )
+        elif os.getenv(ALLOW_INSECURE_BIND_ENV):
+            logger.warning(
+                f"Binding to {host} with no authentication because "
+                f"{ALLOW_INSECURE_BIND_ENV} is set. Only do this where the "
+                "platform controls who can reach this port."
+            )
+        else:
+            logger.error(
+                f"Refusing to bind to {host} without authentication. This "
+                "server can run pacman as root. Set %s, or bind to 127.0.0.1.",
+                AUTH_TOKEN_ENV
+            )
+            raise RuntimeError(
+                f"Refusing to listen on {host} with no {AUTH_TOKEN_ENV} set"
+            )
 
     logger.info(f"Starting Arch Linux MCP HTTP Server on {host}:{port}")
     logger.info("Transport: Server-Sent Events (SSE)")

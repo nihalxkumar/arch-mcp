@@ -17,7 +17,14 @@ arch=('x86_64')
         pkgbuild_content=pkgbuild
     )
     assert "risk_score" in result
-    assert "findings" in result
+    # Findings are reported in three severity buckets; there is no combined
+    # "findings" key and no boolean verdict -- the scan does not certify a
+    # package, so nothing may install on the strength of it.
+    assert "red_flags" in result
+    assert "warnings" in result
+    assert "info" in result
+    assert "limitations" in result
+    assert "safe" not in result
     assert result["action"] == "pkgbuild_analysis"
 
 
