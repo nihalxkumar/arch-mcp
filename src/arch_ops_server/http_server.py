@@ -57,6 +57,34 @@ except Exception as e:
     get_prompt = None
 
 
+class RawASGIEndpoint:
+    """
+    Adapt a raw ASGI handler for use as a Starlette route endpoint.
+
+    Starlette treats a plain function endpoint as ``func(request) -> Response``
+    and awaits whatever it returns. The handlers here write their reply straight
+    to ``send`` and return None, so that wrapper raised
+    ``TypeError: 'NoneType' object is not callable`` -- after the reply had
+    already gone out. A client opening a fresh connection per request (curl)
+    saw a correct response and never noticed; the exception tore the connection
+    down, so any keep-alive client failed on its *second* request.
+
+    Starlette uses a non-function callable as an ASGI app directly, which is
+    what these handlers already are. Method filtering on the Route still
+    applies.
+    """
+
+    def __init__(self, handler):
+        self._handler = handler
+        # Starlette names a route from the endpoint's __name__, falling back to
+        # the class name -- without this, every route would be called
+        # "RawASGIEndpoint".
+        self.__name__ = getattr(handler, "__name__", "raw_asgi_endpoint")
+
+    async def __call__(self, scope, receive, send) -> None:
+        await self._handler(scope, receive, send)
+
+
 async def _handle_direct_mcp_request(request_data: dict) -> dict:
     """
     Handle MCP request directly without SSE session.
@@ -498,14 +526,7 @@ async def handle_sse_raw(scope: dict, receive: Any, send: Any) -> None:
         raise
 
 
-async def handle_sse(request: Request) -> None:
-    """
-    Starlette request handler wrapper for SSE endpoint.
-
-    Args:
-        request: Starlette Request object
-    """
-    await handle_sse_raw(request.scope, request.receive, request._send)
+handle_sse = RawASGIEndpoint(handle_sse_raw)
 
 
 async def handle_messages_raw(scope: dict, receive: Any, send: Any) -> None:
@@ -544,30 +565,9 @@ async def handle_messages_raw(scope: dict, receive: Any, send: Any) -> None:
         })
 
 
-async def handle_messages(request: Request) -> None:
-    """
-    Starlette request handler wrapper for messages endpoint.
-
-    Args:
-        request: Starlette Request object
-    """
-    await handle_messages_raw(request.scope, request.receive, request._send)
+handle_messages = RawASGIEndpoint(handle_messages_raw)
 
 
-async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
-    """
-    Raw ASGI handler for /mcp endpoint (Smithery requirement).
-    
-    Smithery expects a single /mcp endpoint that handles:
-    - GET: Establish SSE connection (streamable HTTP)
-    - POST: Send messages
-    - DELETE: Close connection
-    
-    Args:
-        scope: ASGI scope dictionary
-        receive: ASGI receive callable
-        send: ASGI send callable
-    """
 async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
     """
     Raw ASGI handler for /mcp endpoint (Smithery requirement).
@@ -724,14 +724,7 @@ async def handle_mcp_raw(scope: dict, receive: Any, send: Any) -> None:
             logger.error(f"Failed to send error response: {send_error}", exc_info=True)
 
 
-async def handle_mcp(request: Request) -> None:
-    """
-    Starlette request handler wrapper for /mcp endpoint.
-    
-    Args:
-        request: Starlette Request object
-    """
-    await handle_mcp_raw(request.scope, request.receive, request._send)
+handle_mcp = RawASGIEndpoint(handle_mcp_raw)
 
 
 def create_app() -> Any:
@@ -760,7 +753,9 @@ def create_app() -> Any:
     # - /sse and /messages: Alternative endpoints for other clients
     routes = [
         Route("/mcp", endpoint=handle_mcp, methods=["GET", "POST", "DELETE"]),
-        Route("/sse", endpoint=handle_sse),
+        # methods is explicit: Starlette defaults it to ["GET"] only for
+        # function endpoints, and these are ASGI apps.
+        Route("/sse", endpoint=handle_sse, methods=["GET"]),
         Route("/messages", endpoint=handle_messages, methods=["POST"]),
     ]
 
