@@ -312,3 +312,39 @@ async def test_architecture_specific_weak_checksums_are_flagged(declaration):
         pkgbuild_content=f"{declaration}=('a8f84171ee1796fc4899579d92df0e24')\n"
     )
     assert "collision-broken" in _warning_text(result)
+
+
+# ============================================================================
+# The caveat has to describe what was actually read
+# ============================================================================
+
+
+async def test_limitations_name_the_install_script_when_it_was_not_read():
+    """The default case: PKGBUILD text only, and the caveat says so."""
+    result = await audit_package_security(
+        action="pkgbuild_analysis", pkgbuild_content="pkgname=demo\n"
+    )
+    assert "Does not cover the .install script" in result["limitations"]
+    assert result["scanned_files"] == ["PKGBUILD"]
+
+
+def test_limitations_stop_disclaiming_a_file_that_was_scanned():
+    """
+    Callers that concatenate the install script must not still disclaim it.
+
+    Reporting "does not cover the .install script" over a scan that did read it
+    understates the coverage, which is its own kind of misleading -- it invites
+    a second manual check of the one file already covered.
+    """
+    from arch_ops_server.aur import analyze_pkgbuild_safety
+
+    result = analyze_pkgbuild_safety(
+        "pkgname=demo\npost_install() { :; }\n",
+        scanned_files=["PKGBUILD", "demo.install"],
+    )
+
+    assert "Does not cover the .install script" not in result["limitations"]
+    assert "demo.install" in result["limitations"]
+    assert result["scanned_files"] == ["PKGBUILD", "demo.install"]
+    # The caveats that still hold must survive.
+    assert "not an assurance of safety" in result["limitations"]

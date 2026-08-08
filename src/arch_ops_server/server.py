@@ -77,6 +77,7 @@ from . import (
     run_command,
 )
 
+from .aur import fetch_install_scripts
 from .utils import create_error_response
 from .groups import manage_groups
 from .validation import (
@@ -1590,9 +1591,18 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             # verdict. install_package_secure unwraps the same way.
             metadata = package_info.get("data", package_info)
 
+            # The .install script runs as root at install time, and this path
+            # has the package name, so it can read it. install_package_secure
+            # does; if this did not, the same package would audit clean here
+            # and dirty there, with nothing in the report to explain why.
+            scripts = await fetch_install_scripts(package_name, pkgbuild_content)
+
             # Analyze both metadata and PKGBUILD
             metadata_risk = analyze_package_metadata_risk(metadata)
-            pkgbuild_safety = analyze_pkgbuild_safety(pkgbuild_content)
+            pkgbuild_safety = analyze_pkgbuild_safety(
+                pkgbuild_content + "\n" + scripts["content"],
+                scanned_files=["PKGBUILD"] + scripts["fetched"]
+            )
             
             # Findings come back in three severity buckets. There is no combined
             # "findings" key, and no boolean verdict: this is a static scan, so
@@ -1609,6 +1619,12 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
                 t.get('indicator', '') for t in metadata_risk.get('trust_indicators', [])
             ) or "none recorded"
 
+            # A declared script that could not be read is a gap in this report,
+            # so it goes in the report rather than only in the logs.
+            install_gap = (
+                f"\n⚠️  **{scripts['gap_message']}**\n" if scripts["gap_message"] else ""
+            )
+
             audit_summary = f"""
 # Security Audit Report for {package_name}
 
@@ -1618,11 +1634,12 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
 - **Trust Indicators**: {trust_indicators}
 
 ## PKGBUILD Scan
+- **Files scanned**: {', '.join(pkgbuild_safety.get('scanned_files', []))}
 - **Risk Score**: {pkgbuild_safety.get('risk_score', 'N/A')}/100
 - **Critical patterns matched**: {len(red_flags)}
 - **Suspicious patterns matched**: {len(warnings)}
 - **Informational matches**: {len(info)}
-
+{install_gap}
 {pkgbuild_safety.get('recommendation', '')}
 
 **What this scan does not cover**: {pkgbuild_safety.get('limitations', '')}

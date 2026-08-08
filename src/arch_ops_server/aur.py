@@ -240,6 +240,74 @@ def _declared_install_files(pkgbuild_content: str, package_name: str) -> List[st
     return declared
 
 
+async def fetch_install_scripts(package_name: str, pkgbuild_content: str) -> Dict[str, Any]:
+    """
+    Fetch the install scripts a recipe declares, ready to be scanned with it.
+
+    The .install file runs as root at install time and is a favourite place to
+    hide behaviour a PKGBUILD-only scan would never see, so every audit path
+    holding a package name should read it. One implementation, shared, is what
+    stops those paths from drifting into disagreeing about the same package.
+
+    Names the recipe declares come first; the two conventional names stay as a
+    fallback for a declaration that cannot be resolved. Every candidate is
+    tried rather than stopping at the first hit, because a split package
+    declares one script per package function and reading only the first would
+    leave the rest unscanned. A 404 is the ordinary case: the file is optional.
+
+    Args:
+        package_name: Package whose scripts to fetch.
+        pkgbuild_content: Its PKGBUILD, already fetched, read for install=.
+
+    Returns:
+        content: The scripts concatenated, "" if none were read.
+        fetched: Names actually read, in the order they were tried.
+        sizes: Name to byte count, for callers that report what they read.
+        unreadable: Declared names that could not be fetched.
+        gap_message: What to tell the reader about `unreadable`, "" if none.
+    """
+    declared = _declared_install_files(pkgbuild_content, package_name)
+    candidates = declared + [
+        name for name in (f"{package_name}.install", ".install")
+        if name not in declared
+    ]
+
+    content = ""
+    fetched: List[str] = []
+    sizes: Dict[str, int] = {}
+
+    for candidate in candidates:
+        try:
+            script = await get_aur_file(package_name, candidate)
+        except ValueError:
+            continue
+        fetched.append(candidate)
+        sizes[candidate] = len(script)
+        content += script + "\n"
+
+    # Only a declared name counts as a gap. The conventional names are guesses,
+    # and a 404 on a guess means the package simply has no install script.
+    unreadable = [name for name in declared if name not in fetched]
+
+    gap_message = ""
+    if unreadable:
+        # Not "no install file": the recipe says one runs as root, and failing
+        # to read it is an absence of checking, not an absence of risk.
+        # Reporting it as absent is exactly how a gap goes silent.
+        gap_message = (
+            f"PKGBUILD declares install={', '.join(unreadable)}, which could not be "
+            "fetched - the script that runs as root was NOT analysed"
+        )
+
+    return {
+        "content": content,
+        "fetched": fetched,
+        "sizes": sizes,
+        "unreadable": unreadable,
+        "gap_message": gap_message,
+    }
+
+
 async def get_aur_file(package_name: str, filename: str = "PKGBUILD") -> str:
     """
     Fetch any file from an AUR package via cgit web interface (no cloning required).
@@ -887,52 +955,28 @@ async def install_package_secure(
         pkgbuild_content = await get_pkgbuild(package_name)
         result["messages"].append(f"✅ PKGBUILD fetched ({len(pkgbuild_content)} bytes)")
 
-        # The .install file runs as root at install time and is a favourite
-        # place to hide behaviour that a PKGBUILD-only scan would never see.
-        # It is optional, so a 404 here is normal.
-        #
-        # Take the names the recipe declares first; the conventional two stay
-        # as a fallback for a declaration this cannot resolve. Every candidate
-        # is tried rather than stopping at the first hit, because a split
-        # package declares one script per package function and scanning only
-        # the first would leave the rest unread.
-        declared = _declared_install_files(pkgbuild_content, package_name)
-        candidates = declared + [
-            name for name in (f"{package_name}.install", ".install")
-            if name not in declared
-        ]
+        scripts = await fetch_install_scripts(package_name, pkgbuild_content)
+        install_content = scripts["content"]
 
-        install_content = ""
-        fetched: List[str] = []
-        for candidate in candidates:
-            try:
-                content = await get_aur_file(package_name, candidate)
-            except ValueError:
-                continue
+        for name, size in scripts["sizes"].items():
             result["messages"].append(
-                f"✅ {candidate} fetched ({len(content)} bytes) - "
-                "this runs as root at install time"
+                f"✅ {name} fetched ({size} bytes) - this runs as root at install time"
             )
-            fetched.append(candidate)
-            install_content += content + "\n"
 
-        result["security_checks"]["install_files"] = fetched
+        result["security_checks"]["install_files"] = scripts["fetched"]
 
-        if not fetched:
-            if declared:
-                # Not "no install file": the recipe says one runs as root, and
-                # failing to read it is an absence of checking, not an absence
-                # of risk. Reporting it as absent is how a gap goes silent.
-                result["messages"].append(
-                    f"⚠️  PKGBUILD declares install={', '.join(declared)}, which could "
-                    "not be fetched - the script that runs as root was NOT analysed"
-                )
+        if not scripts["fetched"]:
+            if scripts["unreadable"]:
+                result["messages"].append(f"⚠️  {scripts['gap_message']}")
             else:
                 result["messages"].append("ℹ️  No .install file in this package")
 
         # Scan both files together; findings from the .install script matter at
         # least as much as findings in the PKGBUILD.
-        analysis = analyze_pkgbuild_safety(pkgbuild_content + "\n" + install_content)
+        analysis = analyze_pkgbuild_safety(
+            pkgbuild_content + "\n" + install_content,
+            scanned_files=["PKGBUILD"] + scripts["fetched"]
+        )
         result["security_checks"]["pkgbuild_analysis"] = analysis
         result["messages"].append(f"🛡️  Risk Score: {analysis['risk_score']}/100")
         result["messages"].append(f"   {analysis['recommendation']}")
@@ -994,10 +1038,40 @@ async def install_package_secure(
     return result
 
 
-def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
+def _describe_limitations(scanned: List[str]) -> str:
+    """
+    State what the scan covered and what it still does not.
+
+    The caveat is composed rather than fixed because callers scan different
+    things. A caller that read the install script must not be told the script
+    was not covered, and a caller that read only the PKGBUILD must still be
+    told that it was not -- both directions mislead, in opposite ways.
+
+    Args:
+        scanned: Files whose text went into the scan.
+
+    Returns:
+        The `limitations` sentence for that set of files.
+    """
+    uncovered = ["patches", "upstream source contents", "anything fetched during the build"]
+
+    if scanned == ["PKGBUILD"]:
+        uncovered.insert(0, "the .install script")
+
+    return (
+        f"Static pattern match over {', '.join(scanned)}. Does not cover "
+        f"{', '.join(uncovered[:-1])} or {uncovered[-1]}. Obfuscation defeats "
+        "it. A clean result is not an assurance of safety."
+    )
+
+
+def analyze_pkgbuild_safety(
+    pkgbuild_content: str,
+    scanned_files: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """
     Perform comprehensive safety analysis on PKGBUILD content.
-    
+
     Checks for:
     - Dangerous commands (rm -rf /, dd, fork bombs, etc.)
     - Obfuscated code (base64, eval, encoding tricks)
@@ -1009,20 +1083,27 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     - Suspicious file operations
     
     Args:
-        pkgbuild_content: Raw PKGBUILD text
-    
+        pkgbuild_content: Raw text to scan. Callers that have also fetched the
+            install scripts pass them concatenated onto the PKGBUILD.
+        scanned_files: What that text is, for the caveat to name. Defaults to
+            ["PKGBUILD"]. Passing the real list is what keeps `limitations`
+            from disclaiming a file the caller did read, or from implying one
+            it did not.
+
     Returns:
         Dict with detailed safety analysis results including:
-        - safe: boolean
+        - has_critical_findings: whether anything critical matched
         - red_flags: critical security issues
         - warnings: suspicious patterns
         - info: informational notices
         - risk_score: 0-100 (higher = more dangerous)
         - recommendation: action recommendation
+        - scanned_files: what the caveat was written against
     """
-    import re
     from urllib.parse import urlparse
-    
+
+    scanned = list(scanned_files) if scanned_files else ["PKGBUILD"]
+
     red_flags = []  # Critical security issues
     warnings = []   # Suspicious but not necessarily malicious
     info = []       # Informational notices
@@ -1337,12 +1418,8 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
         "risk_score": risk_score,
         "suspicious_domains": list(set(suspicious_domains)),
         "recommendation": recommendation,
-        "limitations": (
-            "Static pattern match over the PKGBUILD only. Does not cover the "
-            ".install script, patches, upstream source contents, or anything "
-            "fetched during the build. Obfuscation defeats it. A clean result "
-            "is not an assurance of safety."
-        ),
+        "scanned_files": scanned,
+        "limitations": _describe_limitations(scanned),
         "summary": {
             "total_red_flags": len(red_flags),
             "total_warnings": len(warnings),

