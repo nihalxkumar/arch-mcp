@@ -28,6 +28,69 @@ arch=('x86_64')
     assert result["action"] == "pkgbuild_analysis"
 
 
+def _warning_text(result: dict) -> str:
+    """Join every warning message so a test can assert on what was reported."""
+    return " ".join(warning["issue"] for warning in result["warnings"])
+
+
+async def test_pkgbuild_analysis_flags_md5_checksums():
+    """A real md5 digest is a finding: md5 collisions are constructible."""
+    result = await audit_package_security(
+        action="pkgbuild_analysis",
+        pkgbuild_content="md5sums=('a8f84171ee1796fc4899579d92df0e24')\n"
+    )
+    assert "md5" in _warning_text(result)
+    assert "collision-broken" in _warning_text(result)
+
+
+async def test_pkgbuild_analysis_flags_sha1_checksums():
+    """sha1 is broken in the same way and reported the same way."""
+    result = await audit_package_security(
+        action="pkgbuild_analysis",
+        pkgbuild_content="sha1sums=('da39a3ee5e6b4b0d3255bfef95601890afd80709')\n"
+    )
+    assert "sha1" in _warning_text(result)
+    assert "collision-broken" in _warning_text(result)
+
+
+@pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512", "b2"])
+async def test_pkgbuild_analysis_accepts_strong_checksums(algorithm):
+    """Algorithms that still resist collisions produce no integrity finding."""
+    result = await audit_package_security(
+        action="pkgbuild_analysis",
+        pkgbuild_content=f"{algorithm}sums=('abc123')\n"
+    )
+    assert "collision-broken" not in _warning_text(result)
+
+
+async def test_pkgbuild_analysis_reports_skip_without_the_algorithm():
+    """
+    SKIP verifies nothing at all, so the algorithm named alongside it is moot.
+
+    Reporting both would suggest the fix is a stronger hash, when the source is
+    simply unverified.
+    """
+    result = await audit_package_security(
+        action="pkgbuild_analysis",
+        pkgbuild_content="md5sums=('SKIP')\n"
+    )
+    assert "SKIP" in _warning_text(result)
+    assert "collision-broken" not in _warning_text(result)
+
+
+async def test_pkgbuild_analysis_flags_multi_line_md5_array():
+    """The algorithm sits on the declaration line, so a split array still matches."""
+    result = await audit_package_security(
+        action="pkgbuild_analysis",
+        pkgbuild_content=(
+            "md5sums=(\n"
+            "  'a8f84171ee1796fc4899579d92df0e24'\n"
+            ")\n"
+        )
+    )
+    assert "collision-broken" in _warning_text(result)
+
+
 async def test_audit_package_security_missing_pkgbuild():
     """Test error when pkgbuild_content is missing."""
     result = await audit_package_security(action="pkgbuild_analysis")

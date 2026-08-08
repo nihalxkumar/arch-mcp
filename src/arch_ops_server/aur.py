@@ -31,6 +31,11 @@ AUR_CGIT_BASE_URL = "https://aur.archlinux.org/cgit/aur.git/plain"  # No cloning
 DEFAULT_TIMEOUT = 10.0
 MAX_RESULTS = 50  # AUR RPC limit
 
+# PKGBUILD analysis
+# Collision-broken: a matching digest no longer implies matching content, so
+# whoever controls what the source URL serves can swap the bytes underneath it.
+WEAK_HASH_ALGORITHMS = frozenset({"md5", "sha1"})
+
 
 async def search_aur(query: str, limit: int = 20, sort_by: str = "relevance") -> Dict[str, Any]:
     """
@@ -1158,16 +1163,32 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     # pattern matching above, and the original scanner did not look for them.
 
     # Checksums set to SKIP mean the downloaded source is never verified, so
-    # whatever the URL serves at build time is what gets built.
+    # whatever the URL serves at build time is what gets built. A digest from a
+    # broken algorithm is barely better: it certifies that a transfer completed,
+    # not what was transferred.
     for i, line in enumerate(lines, 1):
-        if re.match(r"^\s*(md5|sha1|sha224|sha256|sha384|sha512|b2)sums", line):
-            if "SKIP" in line:
-                warnings.append({
-                    "line": i,
-                    "content": line.strip()[:100],
-                    "issue": "Checksum set to SKIP: this source is not verified at build time",
-                    "severity": "WARNING"
-                })
+        checksum = re.match(r"^\s*(md5|sha1|sha224|sha256|sha384|sha512|b2)sums", line)
+        if not checksum:
+            continue
+        if "SKIP" in line:
+            warnings.append({
+                "line": i,
+                "content": line.strip()[:100],
+                "issue": "Checksum set to SKIP: this source is not verified at build time",
+                "severity": "WARNING"
+            })
+        # SKIP verifies nothing at all, so the algorithm it names is moot --
+        # reporting both would suggest the fix is a stronger hash.
+        elif checksum.group(1) in WEAK_HASH_ALGORITHMS:
+            warnings.append({
+                "line": i,
+                "content": line.strip()[:100],
+                "issue": (
+                    f"{checksum.group(1)} is collision-broken and cannot establish "
+                    "source integrity; prefer sha256 or stronger"
+                ),
+                "severity": "WARNING"
+            })
 
     # A VCS source without a fixed commit builds whatever the branch points at
     # today, so a reviewed recipe does not imply reviewed code.
