@@ -7,20 +7,37 @@ HTTP-based MCP clients, while keeping STDIO transport for Docker MCP Catalog.
 """
 
 import asyncio
+import hmac
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 try:
     from starlette.applications import Starlette
     from starlette.routing import Route
-    from starlette.responses import Response
+    from starlette.responses import Response, JSONResponse
     from starlette.requests import Request
+    from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.middleware.cors import CORSMiddleware
     import uvicorn
     STARLETTE_AVAILABLE = True
 except ImportError:
     STARLETTE_AVAILABLE = False
+    BaseHTTPMiddleware = object
+
+# Configuration read from the environment.
+HOST_ENV = "ARCH_MCP_HOST"
+AUTH_TOKEN_ENV = "ARCH_MCP_AUTH_TOKEN"
+ALLOWED_ORIGINS_ENV = "ARCH_MCP_ALLOWED_ORIGINS"
+# Escape hatch for container platforms that terminate ingress themselves and
+# need the process to listen on all interfaces inside the sandbox.
+ALLOW_INSECURE_BIND_ENV = "ARCH_MCP_ALLOW_INSECURE_BIND"
+
+# Listen on loopback by default. The tools behind this endpoint can run pacman
+# as root, so exposing them to the network must be a deliberate choice.
+DEFAULT_HOST = "127.0.0.1"
+
+AUTH_TOKEN = os.getenv(AUTH_TOKEN_ENV, "")
 
 try:
     from mcp.server.sse import SseServerTransport
@@ -83,6 +100,33 @@ class RawASGIEndpoint:
 
     async def __call__(self, scope, receive, send) -> None:
         await self._handler(scope, receive, send)
+
+
+class BearerTokenMiddleware(BaseHTTPMiddleware):
+    """Reject requests that do not carry the configured bearer token."""
+
+    def __init__(self, app, token: str):
+        super().__init__(app)
+        self._token = token
+
+    async def dispatch(self, request: "Request", call_next):
+        # Preflight carries no credentials; CORS middleware answers it.
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        header = request.headers.get("authorization", "")
+        scheme, _, presented = header.partition(" ")
+
+        # Constant-time comparison so a wrong token cannot be recovered by
+        # timing the response.
+        if scheme.lower() != "bearer" or not hmac.compare_digest(presented, self._token):
+            logger.warning(
+                f"Rejected unauthenticated request to {request.url.path} "
+                f"from {request.client.host if request.client else 'unknown'}"
+            )
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+        return await call_next(request)
 
 
 async def _handle_direct_mcp_request(request_data: dict) -> dict:
@@ -765,15 +809,34 @@ def create_app() -> Any:
     # Create app
     app = Starlette(debug=False, routes=routes)
 
-    # Add CORS middleware for browser-based clients
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
-        allow_headers=["*"],
-        expose_headers=["*"],
-    )
+    # Require a bearer token when one is configured. This server exposes tools
+    # that run pacman as root, so an unauthenticated endpoint is a remote root
+    # surface.
+    if AUTH_TOKEN:
+        app.add_middleware(BearerTokenMiddleware, token=AUTH_TOKEN)
+        logger.info("Bearer token authentication enabled")
+    else:
+        logger.warning(
+            "No %s set: the HTTP endpoint is unauthenticated. Bind it to "
+            "localhost only, or set that variable.", AUTH_TOKEN_ENV
+        )
+
+    # CORS is opt-in by origin. The previous wildcard, combined with
+    # allow_credentials, let any web page the user visited drive this server.
+    allowed_origins = [
+        origin.strip()
+        for origin in os.getenv(ALLOWED_ORIGINS_ENV, "").split(",")
+        if origin.strip()
+    ]
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+            allow_headers=["*"],
+        )
+        logger.info(f"CORS enabled for origins: {allowed_origins}")
 
     logger.info("MCP HTTP Server initialized with SSE transport")
     logger.info("Endpoints: GET/POST/DELETE /mcp (Smithery), GET /sse, POST /messages")
@@ -781,12 +844,16 @@ def create_app() -> Any:
     return app
 
 
-async def run_http_server(host: str = "0.0.0.0", port: int = 8080) -> None:
+async def run_http_server(host: Optional[str] = None, port: int = 8080) -> None:
     """
     Run MCP server with HTTP transport.
 
+    Binds to localhost unless told otherwise. This server can run pacman as
+    root, so listening on every interface by default would have put a root
+    surface on the local network.
+
     Args:
-        host: Host to bind to (default: 0.0.0.0)
+        host: Host to bind to. Defaults to 127.0.0.1, or the HOST env var.
         port: Port to listen on (default: 8080, or PORT env var)
     """
     if not STARLETTE_AVAILABLE:
@@ -796,6 +863,31 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8080) -> None:
 
     # Get port from environment if specified (Smithery sets this)
     port = int(os.getenv("PORT", port))
+
+    if host is None:
+        host = os.getenv(HOST_ENV, DEFAULT_HOST)
+
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        if AUTH_TOKEN:
+            logger.warning(
+                f"Binding to {host}: reachable beyond this machine, "
+                "protected by bearer token."
+            )
+        elif os.getenv(ALLOW_INSECURE_BIND_ENV):
+            logger.warning(
+                f"Binding to {host} with no authentication because "
+                f"{ALLOW_INSECURE_BIND_ENV} is set. Only do this where the "
+                "platform controls who can reach this port."
+            )
+        else:
+            logger.error(
+                f"Refusing to bind to {host} without authentication. This "
+                "server can run pacman as root. Set %s, or bind to 127.0.0.1.",
+                AUTH_TOKEN_ENV
+            )
+            raise RuntimeError(
+                f"Refusing to listen on {host} with no {AUTH_TOKEN_ENV} set"
+            )
 
     logger.info(f"Starting Arch Linux MCP HTTP Server on {host}:{port}")
     logger.info("Transport: Server-Sent Events (SSE)")

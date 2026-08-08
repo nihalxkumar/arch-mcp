@@ -10,8 +10,11 @@ command does. Call sites additionally place a ``--`` end-of-options separator
 before user-supplied values; validation here is the second layer.
 """
 
+import ipaddress
 import re
+import socket
 from typing import Iterable, List
+from urllib.parse import urlparse
 
 # pacman accepts alphanumerics plus '@', '.', '_', '+' and '-' in package names.
 # A leading '-' is excluded by construction so a name can never look like a flag.
@@ -195,6 +198,68 @@ def validate_glob_pattern(pattern: str) -> str:
     return pattern
 
 
+def validate_public_url(url: str) -> str:
+    """
+    Validate a caller-supplied URL before the server fetches it.
+
+    Without this, a tool that accepts a URL becomes a probe for whatever the
+    host can reach that the caller cannot: loopback services, link-local
+    metadata endpoints, and other machines on the local network.
+
+    Args:
+        url: Candidate URL.
+
+    Returns:
+        The URL unchanged, once validated.
+
+    Raises:
+        ValidationError: If the scheme is not http(s), the host is missing, or
+            the host resolves to a non-public address.
+    """
+    if not isinstance(url, str) or not url:
+        raise ValidationError("URL may not be empty")
+
+    _reject_control_characters(url, "URL")
+
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValidationError(
+            f"unsupported URL scheme {parsed.scheme!r}; only http and https are allowed"
+        )
+
+    host = parsed.hostname
+    if not host:
+        raise ValidationError("URL has no host")
+
+    try:
+        resolved = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        # A name we cannot resolve is a name the HTTP client cannot reach
+        # either, since it uses the same resolver. Allowing it here blocks
+        # nothing and lets the fetch report the real failure.
+        return url
+
+    # Every address the name resolves to must be public, so a name that maps to
+    # both a public and a private address is still rejected.
+    for family, _, _, _, sockaddr in resolved:
+        address = ipaddress.ip_address(sockaddr[0])
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or address.is_multicast
+            or address.is_unspecified
+        ):
+            raise ValidationError(
+                f"host {host!r} resolves to the non-public address {address}; "
+                "refusing to fetch it"
+            )
+
+    return url
+
+
 __all__ = [
     "ValidationError",
     "MAX_PACKAGES",
@@ -203,4 +268,5 @@ __all__ = [
     "validate_group_name",
     "validate_file_path",
     "validate_glob_pattern",
+    "validate_public_url",
 ]
