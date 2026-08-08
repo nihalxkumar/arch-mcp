@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
 """
-Simple test script to verify MCP HTTP server functionality.
+Manual smoke test for a *running* MCP HTTP server.
+
+This is not part of the pytest suite: it needs a live server and reaches the
+network. The automated coverage of this transport lives in
+tests/test_http_server.py.
+
+Usage:
+
+    arch-ops-server-http &
+    python scripts/smoke_http_server.py
+
+Set ARCH_MCP_URL to point somewhere other than the default.
 """
 import asyncio
+import os
 import httpx
 import json
 
 
-async def test_http_server():
-    """Test the MCP HTTP server by connecting and listing tools."""
-    base_url = "http://localhost:8080"
+async def run_smoke_test():
+    """Exercise the MCP HTTP endpoint end to end against a running server."""
+    base_url = os.getenv("ARCH_MCP_URL", "http://127.0.0.1:8080").rstrip("/")
 
     print("Testing MCP HTTP Server...")
     print(f"Connecting to {base_url}")
@@ -207,5 +219,5 @@ async def test_http_server():
 
 
 if __name__ == "__main__":
-    success = asyncio.run(test_http_server())
+    success = asyncio.run(run_smoke_test())
     exit(0 if success else 1)
