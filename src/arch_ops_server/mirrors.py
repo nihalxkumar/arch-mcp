@@ -469,9 +469,16 @@ async def optimize_mirrors(
 
         elif action == "test":
             # Test mirror speeds
+            results = await test_mirror_speed(mirror_url=mirror_url)
+
+            # Surface failures at the top level; nesting them under "results"
+            # makes a rejected request look like a successful one.
+            if results.get("error"):
+                return results
+
             return {
                 "action": "test",
-                "results": await test_mirror_speed(mirror_url=mirror_url)
+                "results": results
             }
 
         elif action == "suggest":
