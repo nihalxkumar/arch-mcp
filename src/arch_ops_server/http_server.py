@@ -257,16 +257,19 @@ async def _handle_direct_mcp_request(request_data: dict) -> dict:
                         else:
                             prompt_dict["description"] = ""
                         
-                        # Handle arguments (may be None or empty list)
-                        if hasattr(prompt, 'arguments') and prompt.arguments:
-                            # Ensure arguments is a list
-                            if isinstance(prompt.arguments, list):
-                                prompt_dict["arguments"] = prompt.arguments
-                            else:
-                                # Try to convert to list if it's not
-                                prompt_dict["arguments"] = list(prompt.arguments) if prompt.arguments else []
-                        else:
-                            prompt_dict["arguments"] = []
+                        # Handle arguments (may be None or empty list).
+                        # These are PromptArgument models, not dicts; passing
+                        # them through leaves the whole response unserialisable,
+                        # so reduce each to its primitive fields the way
+                        # tools/list does above.
+                        prompt_dict["arguments"] = [
+                            {
+                                "name": str(argument.name),
+                                "description": str(argument.description or ""),
+                                "required": bool(getattr(argument, "required", False)),
+                            }
+                            for argument in (getattr(prompt, "arguments", None) or [])
+                        ]
                         
                         prompts_list.append(prompt_dict)
                         logger.debug(f"Added prompt: {prompt_dict['name']}")
