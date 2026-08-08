@@ -16,6 +16,14 @@ from .utils import (
     create_error_response,
     check_command_exists
 )
+from .validation import (
+    ValidationError,
+    validate_file_path,
+    validate_glob_pattern,
+    validate_group_name,
+    validate_package_name,
+    validate_package_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +48,13 @@ async def get_official_package_info(package_name: str) -> Dict[str, Any]:
     Returns:
         Dict with package information
     """
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Fetching info for official package: {package_name}")
-    
+
     # Try local pacman first if on Arch
     if IS_ARCH and check_command_exists("pacman"):
         info = await _get_package_info_local(package_name)
@@ -65,7 +78,7 @@ async def _get_package_info_local(package_name: str) -> Optional[Dict[str, Any]]
     """
     try:
         exit_code, stdout, stderr = await run_command(
-            ["pacman", "-Si", package_name],
+            ["pacman", "-Si", "--", package_name],
             timeout=5,
             check=False
         )
@@ -348,6 +361,11 @@ async def remove_package(
             "pacman command not found"
         )
 
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Removing package: {package_name} (deps={remove_dependencies}, force={force})")
 
     # Build command based on options
@@ -360,7 +378,7 @@ async def remove_package(
     else:
         cmd.extend(["-R"])  # Basic removal
 
-    cmd.extend(["--noconfirm", package_name])
+    cmd.extend(["--noconfirm", "--", package_name])
 
     try:
         exit_code, stdout, stderr = await run_command(
@@ -427,6 +445,11 @@ async def remove_packages_batch(
             "No packages specified for removal"
         )
 
+    try:
+        package_names = validate_package_names(package_names)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Batch removing {len(package_names)} packages (deps={remove_dependencies})")
 
     # Build command
@@ -437,7 +460,7 @@ async def remove_packages_batch(
     else:
         cmd.extend(["-R"])
 
-    cmd.extend(["--noconfirm"] + package_names)
+    cmd.extend(["--noconfirm", "--"] + package_names)
 
     try:
         exit_code, stdout, stderr = await run_command(
@@ -518,6 +541,11 @@ async def remove_packages(
             "ValidationError",
             "No packages specified for removal"
         )
+
+    try:
+        package_list = validate_package_names(package_list)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
 
     # Validate force flag usage
     if force and not is_single:
@@ -647,6 +675,13 @@ async def remove_orphans(dry_run: bool = True, exclude: Optional[List[str]] = No
                 "message": "All orphan packages are in exclusion list"
             }
 
+    # The orphan list comes from `pacman -Qtdq`, but it still reaches an argv
+    # that runs as root, so it is validated like any other package name.
+    try:
+        orphans = validate_package_names(orphans)
+    except ValidationError as e:
+        return create_error_response("ValidationError", f"Unexpected orphan package name: {e}")
+
     logger.info(f"Removing {len(orphans)} orphan packages (dry_run={dry_run})")
 
     if dry_run:
@@ -659,7 +694,7 @@ async def remove_orphans(dry_run: bool = True, exclude: Optional[List[str]] = No
 
     try:
         # Remove orphans using pacman -Rns
-        cmd = ["sudo", "pacman", "-Rns", "--noconfirm"] + orphans
+        cmd = ["sudo", "pacman", "-Rns", "--noconfirm", "--"] + orphans
 
         exit_code, stdout, stderr = await run_command(
             cmd,
@@ -773,11 +808,16 @@ async def find_package_owner(file_path: str) -> Dict[str, Any]:
             "pacman command not found"
         )
 
+    try:
+        file_path = validate_file_path(file_path)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Finding owner of file: {file_path}")
 
     try:
         exit_code, stdout, stderr = await run_command(
-            ["pacman", "-Qo", file_path],
+            ["pacman", "-Qo", "--", file_path],
             timeout=5,
             check=False
         )
@@ -840,11 +880,16 @@ async def list_package_files(package_name: str, filter_pattern: Optional[str] = 
             "pacman command not found"
         )
 
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Listing files for package: {package_name}")
 
     try:
         exit_code, stdout, stderr = await run_command(
-            ["pacman", "-Ql", package_name],
+            ["pacman", "-Ql", "--", package_name],
             timeout=10,
             check=False
         )
@@ -913,12 +958,17 @@ async def search_package_files(filename_pattern: str) -> Dict[str, Any]:
             "pacman command not found"
         )
 
+    try:
+        filename_pattern = validate_glob_pattern(filename_pattern)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Searching for files matching: {filename_pattern}")
 
     try:
         # First check if file database is synced
         exit_code, stdout, stderr = await run_command(
-            ["pacman", "-F", filename_pattern],
+            ["pacman", "-F", "--", filename_pattern],
             timeout=30,
             check=False
         )
@@ -1070,10 +1120,15 @@ async def verify_package_integrity(package_name: str, thorough: bool = False) ->
             "pacman command not found"
         )
 
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Verifying package integrity: {package_name} (thorough={thorough})")
 
     try:
-        cmd = ["pacman", "-Qkk" if thorough else "-Qk", package_name]
+        cmd = ["pacman", "-Qkk" if thorough else "-Qk", "--", package_name]
 
         exit_code, stdout, stderr = await run_command(
             cmd,
@@ -1192,11 +1247,16 @@ async def list_group_packages(group_name: str) -> Dict[str, Any]:
             "pacman command not found"
         )
 
+    try:
+        group_name = validate_group_name(group_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Listing packages in group: {group_name}")
 
     try:
         exit_code, stdout, stderr = await run_command(
-            ["pacman", "-Sg", group_name],
+            ["pacman", "-Sg", "--", group_name],
             timeout=10,
             check=False
         )
@@ -1313,11 +1373,16 @@ async def mark_as_explicit(package_name: str) -> Dict[str, Any]:
             "pacman command not found"
         )
 
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Marking {package_name} as explicitly installed")
 
     try:
         exit_code, stdout, stderr = await run_command(
-            ["sudo", "pacman", "-D", "--asexplicit", package_name],
+            ["sudo", "pacman", "-D", "--asexplicit", "--", package_name],
             timeout=10,
             check=False,
             skip_sudo_check=True
@@ -1367,11 +1432,16 @@ async def mark_as_dependency(package_name: str) -> Dict[str, Any]:
             "pacman command not found"
         )
 
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
     logger.info(f"Marking {package_name} as dependency")
 
     try:
         exit_code, stdout, stderr = await run_command(
-            ["sudo", "pacman", "-D", "--asdeps", package_name],
+            ["sudo", "pacman", "-D", "--asdeps", "--", package_name],
             timeout=10,
             check=False,
             skip_sudo_check=True

@@ -8,7 +8,7 @@ for the Arch Linux MCP server.
 
 import logging
 import json
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from mcp.server import Server
@@ -76,7 +76,14 @@ from . import (
     run_command,
 )
 
+from .utils import create_error_response
 from .groups import manage_groups
+from .validation import (
+    ValidationError,
+    validate_group_name,
+    validate_package_name,
+    validate_package_names,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -1084,6 +1091,51 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# Tool arguments that reach a subprocess argument vector, mapped to their validator.
+# Arguments not listed here never become argv entries.
+_ARGUMENT_VALIDATORS = {
+    "package_name": validate_package_name,
+    "group_name": validate_group_name,
+}
+
+
+def _validate_tool_arguments(arguments: dict[str, Any]) -> Optional[dict]:
+    """
+    Validate tool arguments that end up in a command's argument vector.
+
+    Args:
+        arguments: Raw tool arguments from the MCP client.
+
+    Returns:
+        A structured error response if any argument is invalid, otherwise None.
+    """
+    if not arguments:
+        return None
+
+    for key, validator in _ARGUMENT_VALIDATORS.items():
+        value = arguments.get(key)
+        if value is None:
+            continue
+        try:
+            validator(value)
+        except ValidationError as e:
+            logger.warning(f"Rejected tool argument {key}={value!r}: {e}")
+            return create_error_response("ValidationError", f"{key}: {e}")
+
+    # 'packages' accepts either a single name or a list of them.
+    packages = arguments.get("packages")
+    if packages is not None:
+        try:
+            validate_package_names(
+                [packages] if isinstance(packages, str) else packages
+            )
+        except (ValidationError, TypeError) as e:
+            logger.warning(f"Rejected tool argument packages={packages!r}: {e}")
+            return create_error_response("ValidationError", f"packages: {e}")
+
+    return None
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | ImageContent | EmbeddedResource]:
     """
@@ -1100,7 +1152,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         ValueError: If tool name is unknown
     """
     logger.info(f"Calling tool: {name} with args: {arguments}")
-    
+
+    # Second validation layer. The individual modules validate their own inputs,
+    # but doing it here as well means a tool added later cannot reach a
+    # subprocess with an unchecked name just because its handler forgot to call
+    # the validator.
+    validation_error = _validate_tool_arguments(arguments)
+    if validation_error:
+        return [TextContent(type="text", text=json.dumps(validation_error, indent=2))]
+
     if name == "search_archwiki":
         query = arguments["query"]
         limit = arguments.get("limit", 10)

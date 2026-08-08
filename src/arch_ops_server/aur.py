@@ -6,16 +6,18 @@ Provides search, package info, and PKGBUILD retrieval via AUR RPC v5.
 
 import logging
 from typing import Dict, Any, List, Optional, Literal
+from urllib.parse import quote
 import httpx
 from datetime import datetime
 
 from .utils import (
-    create_error_response, 
-    add_aur_warning, 
+    create_error_response,
+    add_aur_warning,
     get_aur_helper,
     IS_ARCH,
     run_command
 )
+from .validation import ValidationError, validate_package_name
 
 logger = logging.getLogger(__name__)
 
@@ -205,16 +207,22 @@ async def get_aur_file(package_name: str, filename: str = "PKGBUILD") -> str:
         >>> pkgbuild = await get_aur_file("yay", "PKGBUILD")
         >>> srcinfo = await get_aur_file("yay", ".SRCINFO")
     """
+    package_name = validate_package_name(package_name)
+
     logger.info(f"Fetching {filename} for package: {package_name}")
-    
-    # Construct cgit URL for the specific file
+
+    # Construct cgit URL for the specific file.
     # Format: https://aur.archlinux.org/cgit/aur.git/plain/{filename}?h={package_name}
-    base_url = "https://aur.archlinux.org/cgit/aur.git/plain"
-    url = f"{base_url}/{filename}?h={package_name}"
-    
+    # Both components are percent-encoded: an unencoded filename can traverse out
+    # of the intended cgit path, and an unencoded package name can append extra
+    # query parameters.
+    url = f"{AUR_CGIT_BASE_URL}/{quote(filename, safe='')}"
+
     try:
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            response = await client.get(url, follow_redirects=True)
+            response = await client.get(
+                url, params={"h": package_name}, follow_redirects=True
+            )
             response.raise_for_status()
             
             content = response.text
@@ -664,7 +672,7 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
         Dict with installation status and security analysis
     """
     logger.info(f"Starting secure installation workflow for: {package_name}")
-    
+
     # Only supported on Arch Linux
     if not IS_ARCH:
         return create_error_response(
@@ -672,7 +680,13 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
             "Package installation is only supported on Arch Linux systems",
             "This server is not running on Arch Linux"
         )
-    
+
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
+
     result = {
         "package": package_name,
         "installed": False,
