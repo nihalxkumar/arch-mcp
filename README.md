@@ -103,14 +103,14 @@ Direct access to Arch ecosystem data via custom URI schemes:
 | Tool                     | Description                                                               | Platform  |
 | ------------------------ | ------------------------------------------------------------------------- | --------- |
 | `check_updates_dry_run`  | Check for available updates                                               | Arch only |
-| `install_package_secure` | Install with security checks (blocks malicious packages)                  | Arch only |
-| `remove_packages`        | Remove packages - accepts single package name or list (with deps, forced) | Arch only |
+| `install_package_secure` | Install an official-repo package (dry run unless `confirm=true`); audits AUR packages without installing them | Arch only |
+| `remove_packages`        | Remove packages - single name or list, optionally with dependencies. Dry run unless `confirm=true` | Arch only |
 
 #### Package Analysis & Maintenance
 
 | Tool                       | Description                                                                                                                 | Platform  |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `manage_orphans`           | Manage orphaned packages (2 actions: list orphaned packages, remove orphans). Always runs in dry-run mode first for safety. | Arch only |
+| `manage_orphans`           | Manage orphaned packages (2 actions: list, remove). Removal needs both `dry_run=false` and `confirm=true`. | Arch only |
 | `verify_package_integrity` | Check file integrity (modified/missing files)                                                                               | Arch only |
 | `manage_install_reason`    | Manage install reasons (3 actions: list explicit packages, mark as explicit/dependency)                                     | Arch only |
 
@@ -221,6 +221,53 @@ Opencode:
   }
 }
 ```
+
+## Security model
+
+The tools that change your system are deliberately awkward to trigger by accident.
+
+**Nothing is installed or removed without an explicit `confirm`.** `install_package_secure`,
+`remove_packages` and `manage_orphans` default to a dry run that reports the exact command
+they would execute and change nothing. Orphan removal additionally requires `dry_run=false`,
+because the package set is computed at call time and the dry run is how you see it.
+
+**AUR packages are never installed by this server.** The PKGBUILD audit is a static pattern
+match over the PKGBUILD and `.install` file. It cannot see the upstream sources or anything
+the build fetches while it runs, and ordinary shell quoting defeats it. A clean scan is not
+evidence that a package is safe, so the tool returns the audit and the command for you to run
+under your AUR helper's own diff review.
+
+**Root access goes through an askpass prompt.** No desktop environment is assumed: the server
+looks for whichever helper you have — `seahorse` (GNOME), `ksshaskpass` (KDE),
+`lxqt-openssh-askpass` (LXQt), `x11-ssh-askpass`, or anything you set in `SUDO_ASKPASS` or
+`/etc/sudo.conf` — and asks sudo to prompt you in your own session. Your password never passes
+through the server process. If no helper is available, sudo is still attempted
+non-interactively, so an already-valid sudo timestamp keeps working; otherwise you get the
+command to run yourself. **Do not add a `NOPASSWD` sudoers rule** — that removes the last human
+in the loop, letting any tool call reach root unprompted.
+
+**Be aware of what reaches the model.** Tools like `search_aur`, `fetch_news` and
+`search_archwiki` pull third-party text into the conversation, in the same session as tools
+that can modify your system. Treat a package description that tells the assistant to install
+something as what it is.
+
+**The HTTP transport listens on localhost only.** Binding elsewhere requires
+`ARCH_MCP_AUTH_TOKEN` (bearer token auth); the server refuses to start otherwise. CORS is off
+unless you list origins in `ARCH_MCP_ALLOWED_ORIGINS`. For local use prefer the STDIO transport,
+which needs none of this.
+
+**Mirror speed tests only reach public addresses.** `optimize_mirrors` with `action="test"`
+rejects a URL resolving to a loopback, private or link-local address, so a caller cannot use it
+to probe your LAN or a cloud metadata endpoint. The cost is that it cannot measure a mirror on
+your own network either; test those with `rankmirrors` instead.
+
+| Variable | Purpose |
+| --- | --- |
+| `ARCH_MCP_HOST` | Bind address for the HTTP transport (default `127.0.0.1`) |
+| `ARCH_MCP_AUTH_TOKEN` | Required bearer token; also required to bind a non-loopback address |
+| `ARCH_MCP_ALLOWED_ORIGINS` | Comma-separated CORS origins (default: none) |
+| `ARCH_MCP_ALLOW_INSECURE_BIND` | Permit a non-loopback bind with no token. Only for container platforms that control who can reach the port — `Dockerfile.smithery` sets it |
+| `SUDO_ASKPASS` | Askpass helper to use, if you want to override auto-detection |
 
 ## Contributing
 

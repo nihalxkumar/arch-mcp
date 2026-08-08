@@ -35,6 +35,17 @@ CRITICAL_KEYWORDS = [
     "important notice"
 ]
 
+# pacman has logged ISO-8601 timestamps since 5.2 (2019):
+#   [2026-08-08T16:50:25+0200] [PACMAN] starting full system upgrade
+# Capture the whole stamp and let fromisoformat read the offset rather than
+# rebuilding the string, which is how the timezone used to be lost.
+PACMAN_LOG_TIMESTAMP = re.compile(r"^\[([^\]]+)\]")
+
+# Only a full system upgrade marks the boundary the user actually crossed.
+# " installed "/" upgraded " would let a single-package install shrink the
+# window and hide announcements.
+FULL_UPGRADE_MARKER = "starting full system upgrade"
+
 
 async def get_latest_news(
     limit: int = 10,
@@ -197,13 +208,50 @@ async def check_critical_news(limit: int = 20) -> Dict[str, Any]:
     }
 
 
+def _parse_last_full_upgrade(pacman_log: Path) -> Optional[datetime]:
+    """
+    Find the timestamp of the last full system upgrade in a pacman log.
+
+    Args:
+        pacman_log: Path to the log to read
+
+    Returns:
+        Timezone-aware timestamp of the last full upgrade, or None if the log
+        records none
+    """
+    last_update = None
+
+    with open(pacman_log, 'r') as f:
+        for line in f:
+            if FULL_UPGRADE_MARKER not in line:
+                continue
+
+            match = PACMAN_LOG_TIMESTAMP.match(line)
+            if not match:
+                continue
+
+            try:
+                stamp = datetime.fromisoformat(match.group(1))
+            except ValueError:
+                continue
+
+            # Pre-5.2 log lines parse naive; treat them as local time so the
+            # comparison against timezone-aware feed dates is well defined.
+            last_update = stamp if stamp.tzinfo else stamp.astimezone()
+
+    return last_update
+
+
 async def get_news_since_last_update() -> Dict[str, Any]:
     """
     Get news posted since last pacman update.
     Parses /var/log/pacman.log for last update timestamp.
 
     Returns:
-        Dict with news items posted after last update
+        Dict with news items posted after last update. When the log records no
+        full system upgrade, every recent item is returned with
+        boundary_known set to False rather than an error: over-reporting costs
+        the user a moment's reading, under-reporting defeats the check.
     """
     if not IS_ARCH:
         return create_error_response(
@@ -213,78 +261,77 @@ async def get_news_since_last_update() -> Dict[str, Any]:
 
     logger.info("Getting news since last pacman update")
 
+    pacman_log = Path("/var/log/pacman.log")
+
+    if not pacman_log.exists():
+        return create_error_response(
+            "NotFound",
+            "Pacman log file not found at /var/log/pacman.log"
+        )
+
     try:
-        # Parse pacman log for last update timestamp
-        pacman_log = Path("/var/log/pacman.log")
+        last_update = _parse_last_full_upgrade(pacman_log)
+    except OSError as e:
+        logger.error(f"Failed to read {pacman_log}: {e}")
+        return create_error_response(
+            "ReadError",
+            f"Could not read {pacman_log}: {e}"
+        )
 
-        if not pacman_log.exists():
-            return create_error_response(
-                "NotFound",
-                "Pacman log file not found at /var/log/pacman.log"
-            )
+    # Fetch recent news
+    result = await get_latest_news(limit=30)
 
-        # Find last system update timestamp
-        last_update = None
+    if "error" in result:
+        return result
 
-        with open(pacman_log, 'r') as f:
-            for line in f:
-                # Look for upgrade entries
-                if " upgraded " in line or " installed " in line or "starting full system upgrade" in line:
-                    # Extract timestamp [YYYY-MM-DD HH:MM]
-                    match = re.match(r'\[(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\]', line)
-                    if match:
-                        date_str = f"{match.group(1)}T{match.group(2)}:00+00:00"
-                        try:
-                            last_update = datetime.fromisoformat(date_str)
-                        except ValueError:
-                            continue
+    news_items = result.get("news", [])
 
-        if last_update is None:
-            logger.warning("Could not determine last update timestamp")
-            return create_error_response(
-                "NotFound",
-                "Could not determine last system update timestamp from pacman log"
-            )
-
-        logger.info(f"Last update: {last_update.isoformat()}")
-
-        # Fetch recent news
-        result = await get_latest_news(limit=30)
-
-        if "error" in result:
-            return result
-
-        news_items = result.get("news", [])
-        news_since_update = []
-
-        for item in news_items:
-            published_str = item.get("published", "")
-            if not published_str:
-                continue
-
-            try:
-                published = datetime.fromisoformat(published_str.replace('Z', '+00:00'))
-                if published > last_update:
-                    news_since_update.append(item)
-            except ValueError as e:
-                logger.warning(f"Failed to parse date: {e}")
-                continue
-
-        logger.info(f"Found {len(news_since_update)} news items since last update")
-
+    if last_update is None:
+        logger.warning(f"No full system upgrade recorded in {pacman_log}")
         return {
-            "last_update": last_update.isoformat(),
-            "news_count": len(news_since_update),
-            "has_news": len(news_since_update) > 0,
-            "news": news_since_update
+            "last_update": None,
+            "boundary_known": False,
+            "note": (
+                "No full system upgrade found in /var/log/pacman.log; the log "
+                "may be rotated. Reporting all recent news rather than filtering."
+            ),
+            "news_count": len(news_items),
+            "has_news": bool(news_items),
+            "news": news_items
         }
 
-    except Exception as e:
-        logger.error(f"Failed to get news since update: {e}")
-        return create_error_response(
-            "NewsError",
-            f"Failed to get news since last update: {str(e)}"
-        )
+    logger.info(f"Last update: {last_update.isoformat()}")
+
+    news_since_update = []
+
+    for item in news_items:
+        published_str = item.get("published", "")
+        if not published_str:
+            continue
+
+        try:
+            published = datetime.fromisoformat(published_str.replace('Z', '+00:00'))
+        except ValueError as e:
+            logger.warning(f"Failed to parse date: {e}")
+            continue
+
+        # get_latest_news falls back to the raw pubDate when it cannot parse
+        # one, so a naive date can reach here; compare like with like.
+        if published.tzinfo is None:
+            published = published.astimezone()
+
+        if published > last_update:
+            news_since_update.append(item)
+
+    logger.info(f"Found {len(news_since_update)} news items since last update")
+
+    return {
+        "last_update": last_update.isoformat(),
+        "boundary_known": True,
+        "news_count": len(news_since_update),
+        "has_news": len(news_since_update) > 0,
+        "news": news_since_update
+    }
 
 
 async def fetch_news(

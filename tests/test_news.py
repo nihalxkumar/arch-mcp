@@ -195,56 +195,163 @@ class TestCriticalNews:
             assert result["critical_count"] == 0
 
 
+def build_rss_feed(*items):
+    """Build an RSS feed body from (title, pubDate) pairs."""
+    entries = "\n".join(
+        f"""        <item>
+            <title>{title}</title>
+            <link>https://archlinux.org/news/{index}/</link>
+            <pubDate>{pub_date}</pubDate>
+            <description><![CDATA[<p>Announcement {index}.</p>]]></description>
+        </item>"""
+        for index, (title, pub_date) in enumerate(items)
+    )
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+    <channel>
+{entries}
+    </channel>
+</rss>
+""".encode('utf-8')
+
+
+async def news_since_update(pacman_log, feed):
+    """Run get_news_since_last_update against a fake pacman log and feed."""
+    mock_response = MagicMock()
+    mock_response.content = feed
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("httpx.AsyncClient") as mock_client, \
+         patch("pathlib.Path.exists", return_value=True), \
+         patch("builtins.open", mock_open(read_data=pacman_log)):
+        mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+            return_value=mock_response
+        )
+
+        return await get_news_since_last_update()
+
+
 class TestNewsSinceUpdate:
     """Test news since last update functionality."""
 
     @pytest.fixture
     def sample_pacman_log(self):
-        """Sample pacman log content."""
-        return """[2025-11-08 10:00] [PACMAN] Running 'pacman -Syu'
-[2025-11-08 10:01] [ALPM] upgraded linux (6.6.1-1 -> 6.6.2-1)
-[2025-11-08 10:02] [ALPM] upgraded systemd (255.1-1 -> 255.2-1)
-[2025-11-08 10:03] [PACMAN] synchronizing package lists
-[2025-11-09 15:30] [ALPM] installed test-package (1.0-1)
+        """Pacman log in the ISO-8601 format pacman has written since 5.2."""
+        return """[2026-08-06T09:12:03+0200] [PACMAN] starting full system upgrade
+[2026-08-06T09:12:40+0200] [ALPM] upgraded linux (6.6.1-1 -> 6.6.2-1)
+[2026-08-08T10:00:00+0200] [PACMAN] starting full system upgrade
+[2026-08-08T10:00:31+0200] [ALPM] upgraded systemd (255.1-1 -> 255.2-1)
+[2026-08-08T18:30:00+0200] [ALPM] installed test-package (1.0-1)
 """
 
     @pytest.mark.asyncio
     @patch("arch_ops_server.news.IS_ARCH", True)
     async def test_get_news_since_last_update_success(self, sample_pacman_log):
-        """Test getting news since last update."""
-        rss_feed = """<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
-    <channel>
-        <item>
-            <title>Recent news after update</title>
-            <link>https://archlinux.org/news/recent/</link>
-            <pubDate>Mon, 10 Nov 2025 10:00:00 +0000</pubDate>
-            <description><![CDATA[<p>New announcement.</p>]]></description>
-        </item>
-        <item>
-            <title>Old news before update</title>
-            <link>https://archlinux.org/news/old/</link>
-            <pubDate>Wed, 06 Nov 2025 10:00:00 +0000</pubDate>
-            <description><![CDATA[<p>Old announcement.</p>]]></description>
-        </item>
-    </channel>
-</rss>
+        """The boundary is the last full upgrade, and only later news is returned."""
+        feed = build_rss_feed(
+            ("Announced after the upgrade", "Sat, 08 Aug 2026 12:00:00 +0000"),
+            ("Announced before the upgrade", "Thu, 06 Aug 2026 06:00:00 +0000"),
+        )
+
+        result = await news_since_update(sample_pacman_log, feed)
+
+        assert result["last_update"] == "2026-08-08T10:00:00+02:00"
+        assert result["boundary_known"] is True
+        assert result["has_news"] is True
+        assert result["news_count"] == 1
+        assert [item["title"] for item in result["news"]] == [
+            "Announced after the upgrade"
+        ]
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.news.IS_ARCH", True)
+    async def test_get_news_since_last_update_honours_timezone(self):
+        """The log's own offset is used, not a hardcoded UTC one."""
+        # 10:00+0200 is 08:00 UTC. An item published at 09:00 UTC comes after
+        # the upgrade; reading the stamp as if it were UTC would hide it.
+        pacman_log = "[2026-08-08T10:00:00+0200] [PACMAN] starting full system upgrade\n"
+        feed = build_rss_feed(
+            ("Published in the offset window", "Sat, 08 Aug 2026 09:00:00 +0000"),
+        )
+
+        result = await news_since_update(pacman_log, feed)
+
+        assert result["last_update"] == "2026-08-08T10:00:00+02:00"
+        assert result["news_count"] == 1
+        assert result["news"][0]["title"] == "Published in the offset window"
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.news.IS_ARCH", True)
+    async def test_get_news_since_last_update_ignores_package_install(
+        self, sample_pacman_log
+    ):
+        """A later single-package install must not move the boundary forward."""
+        # The log ends with an install at 18:30+0200 (16:30 UTC), hours after
+        # the last full upgrade at 10:00+0200 (08:00 UTC).
+        feed = build_rss_feed(
+            ("Published between upgrade and install", "Sat, 08 Aug 2026 14:00:00 +0000"),
+        )
+
+        result = await news_since_update(sample_pacman_log, feed)
+
+        assert result["last_update"] == "2026-08-08T10:00:00+02:00"
+        assert result["news_count"] == 1
+        assert result["news"][0]["title"] == "Published between upgrade and install"
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.news.IS_ARCH", True)
+    async def test_get_news_since_last_update_legacy_log_format(self):
+        """Pre-5.2 space-separated stamps still parse, and land timezone-aware."""
+        pacman_log = """[2025-11-08 10:00] [PACMAN] starting full system upgrade
+[2025-11-08 10:01] [ALPM] upgraded linux (6.6.1-1 -> 6.6.2-1)
 """
-        mock_response = MagicMock()
-        mock_response.content = rss_feed.encode('utf-8')
-        mock_response.raise_for_status = MagicMock()
+        # A naive stamp is read as local time, so the expectation has to be too.
+        # The feed dates sit days either side, well clear of any host offset.
+        expected = datetime.fromisoformat("2025-11-08 10:00").astimezone()
+        feed = build_rss_feed(
+            ("Announced after the upgrade", "Wed, 12 Nov 2025 10:00:00 +0000"),
+            ("Announced before the upgrade", "Tue, 04 Nov 2025 10:00:00 +0000"),
+        )
 
-        with patch("httpx.AsyncClient") as mock_client, \
-             patch("builtins.open", mock_open(read_data=sample_pacman_log)):
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                return_value=mock_response
-            )
+        result = await news_since_update(pacman_log, feed)
 
+        assert result["last_update"] == expected.isoformat()
+        assert [item["title"] for item in result["news"]] == [
+            "Announced after the upgrade"
+        ]
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.news.IS_ARCH", True)
+    async def test_get_news_since_last_update_no_full_upgrade(self):
+        """With no upgrade to anchor on, report all the news rather than none."""
+        pacman_log = """[2026-08-08T10:00:31+0200] [ALPM] installed test-package (1.0-1)
+[2026-08-08T18:30:00+0200] [ALPM] upgraded linux (6.6.1-1 -> 6.6.2-1)
+"""
+        feed = build_rss_feed(
+            ("First announcement", "Sat, 08 Aug 2026 12:00:00 +0000"),
+            ("Second announcement", "Thu, 06 Aug 2026 06:00:00 +0000"),
+        )
+
+        result = await news_since_update(pacman_log, feed)
+
+        assert "error" not in result
+        assert result["last_update"] is None
+        assert result["boundary_known"] is False
+        assert "rotated" in result["note"]
+        assert result["has_news"] is True
+        assert result["news_count"] == 2
+
+    @pytest.mark.asyncio
+    @patch("arch_ops_server.news.IS_ARCH", True)
+    async def test_get_news_since_last_update_unreadable_log(self):
+        """An unreadable log is reported as such, not as a generic news error."""
+        with patch("pathlib.Path.exists", return_value=True), \
+             patch("builtins.open", side_effect=PermissionError("Permission denied")):
             result = await get_news_since_last_update()
 
-            assert result["has_news"] is True
-            assert result["news_count"] >= 0
-            assert "last_update" in result
+        assert "error" in result
+        assert result["type"] == "ReadError"
+        assert "Permission denied" in result["message"]
 
     @pytest.mark.asyncio
     @patch("arch_ops_server.news.IS_ARCH", False)
