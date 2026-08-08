@@ -963,7 +963,7 @@ async def list_tools() -> list[Tool]:
         # News Tools
         Tool(
             name="fetch_news",
-            description="[DISCOVERY] Unified news fetching from Arch Linux. Actions: latest (get recent news), critical (find news requiring manual intervention), since_update (news since last system update). Works on any system for latest/critical, Arch only for since_update.",
+            description="[DISCOVERY] Unified news fetching from Arch Linux. Actions: latest (get recent news), critical (find news requiring manual intervention), since_update (news published since the last full system upgrade in /var/log/pacman.log; when the log records no such upgrade it reports all recent news with boundary_known false rather than failing). Works on any system for latest/critical, Arch only for since_update.",
             inputSchema={
                 "type": "object",
                 "properties": {
