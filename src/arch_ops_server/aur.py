@@ -5,6 +5,7 @@ Provides search, package info, and PKGBUILD retrieval via AUR RPC v5.
 """
 
 import logging
+import re
 from typing import Dict, Any, List, Optional, Literal
 from urllib.parse import quote
 import httpx
@@ -39,6 +40,15 @@ WEAK_HASH_ALGORITHMS = frozenset({"md5", "sha1"})
 # Prebuilt artifacts a recipe pulls in rather than builds. Entries keep their
 # conventional casing and are matched case-insensitively.
 BINARY_EXTENSIONS = ('.bin', '.exe', '.AppImage', '.deb', '.rpm', '.jar', '.apk')
+
+# A PKGBUILD names its install script with install=; split packages name one
+# per package function. Anchored at the start of a line so _install= and an
+# `install -d` command are not mistaken for a declaration.
+_INSTALL_DECLARATION = re.compile(r"^[ \t]*install=[\"\']?([^\"\'\s#]+)", re.MULTILINE)
+
+# The name reaches a URL, so keep it to what an AUR filename plausibly is.
+# get_aur_file percent-encodes it as well; this is the earlier of the two gates.
+_INSTALL_FILENAME = re.compile(r"^[a-zA-Z0-9._+-]{1,128}$")
 
 
 async def search_aur(query: str, limit: int = 20, sort_by: str = "relevance") -> Dict[str, Any]:
@@ -194,6 +204,40 @@ async def get_aur_info(package_name: str) -> Dict[str, Any]:
             "InfoError",
             f"Failed to get AUR package info: {str(e)}"
         )
+
+
+def _declared_install_files(pkgbuild_content: str, package_name: str) -> List[str]:
+    """
+    Install scripts the recipe names, in declaration order.
+
+    install= may name any file, so probing only the conventional names misses
+    the script whenever a recipe chooses another one -- and the script runs as
+    root at install time, which is exactly what the audit exists to look at.
+
+    $pkgname and $pkgbase are expanded because that is how the convention is
+    usually written. Any other expansion is left alone and then dropped by the
+    filename check, since resolving it would mean interpreting the recipe.
+
+    Args:
+        pkgbuild_content: Raw PKGBUILD text.
+        package_name: Package being audited, used to expand $pkgname/$pkgbase.
+
+    Returns:
+        Distinct filenames, in the order the recipe declares them.
+    """
+    declared: List[str] = []
+
+    for raw in _INSTALL_DECLARATION.findall(pkgbuild_content):
+        candidate = raw
+        for variable in ("${pkgname}", "$pkgname", "${pkgbase}", "$pkgbase"):
+            candidate = candidate.replace(variable, package_name)
+
+        if _INSTALL_FILENAME.match(candidate) and candidate not in declared:
+            declared.append(candidate)
+        elif not _INSTALL_FILENAME.match(candidate):
+            logger.debug(f"Unresolvable install= declaration, skipping: {raw!r}")
+
+    return declared
 
 
 async def get_aur_file(package_name: str, filename: str = "PKGBUILD") -> str:
@@ -846,21 +890,45 @@ async def install_package_secure(
         # The .install file runs as root at install time and is a favourite
         # place to hide behaviour that a PKGBUILD-only scan would never see.
         # It is optional, so a 404 here is normal.
+        #
+        # Take the names the recipe declares first; the conventional two stay
+        # as a fallback for a declaration this cannot resolve. Every candidate
+        # is tried rather than stopping at the first hit, because a split
+        # package declares one script per package function and scanning only
+        # the first would leave the rest unread.
+        declared = _declared_install_files(pkgbuild_content, package_name)
+        candidates = declared + [
+            name for name in (f"{package_name}.install", ".install")
+            if name not in declared
+        ]
+
         install_content = ""
-        for candidate in (f"{package_name}.install", ".install"):
+        fetched: List[str] = []
+        for candidate in candidates:
             try:
-                install_content = await get_aur_file(package_name, candidate)
-                result["messages"].append(
-                    f"✅ {candidate} fetched ({len(install_content)} bytes) - "
-                    "this runs as root at install time"
-                )
-                result["security_checks"]["install_file"] = candidate
-                break
+                content = await get_aur_file(package_name, candidate)
             except ValueError:
                 continue
+            result["messages"].append(
+                f"✅ {candidate} fetched ({len(content)} bytes) - "
+                "this runs as root at install time"
+            )
+            fetched.append(candidate)
+            install_content += content + "\n"
 
-        if not install_content:
-            result["messages"].append("ℹ️  No .install file in this package")
+        result["security_checks"]["install_files"] = fetched
+
+        if not fetched:
+            if declared:
+                # Not "no install file": the recipe says one runs as root, and
+                # failing to read it is an absence of checking, not an absence
+                # of risk. Reporting it as absent is how a gap goes silent.
+                result["messages"].append(
+                    f"⚠️  PKGBUILD declares install={', '.join(declared)}, which could "
+                    "not be fetched - the script that runs as root was NOT analysed"
+                )
+            else:
+                result["messages"].append("ℹ️  No .install file in this package")
 
         # Scan both files together; findings from the .install script matter at
         # least as much as findings in the PKGBUILD.
