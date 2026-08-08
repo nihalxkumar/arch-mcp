@@ -204,19 +204,19 @@ class TestPKGBUILDSafetyAnalysis:
         """Test analysis of a safe PKGBUILD."""
         result = analyze_pkgbuild_safety(sample_pkgbuild_safe)
 
-        assert result["safe"] is True
+        assert result["has_critical_findings"] is False
         assert len(result["red_flags"]) == 0
         assert result["risk_score"] < 30  # Low risk
-        assert "SAFE" in result["recommendation"]
+        assert "not evidence that the package is safe" in result["recommendation"]
 
     def test_analyze_dangerous_pkgbuild(self, sample_pkgbuild_dangerous):
         """Test analysis of a malicious PKGBUILD."""
         result = analyze_pkgbuild_safety(sample_pkgbuild_dangerous)
 
-        assert result["safe"] is False
+        assert result["has_critical_findings"] is True
         assert len(result["red_flags"]) > 0
         assert result["risk_score"] > 70  # High risk
-        assert "DO NOT INSTALL" in result["recommendation"]
+        assert "Do not install" in result["recommendation"]
 
     def test_detect_curl_pipe_sh(self):
         """Test detection of 'curl | sh' pattern."""
@@ -227,7 +227,7 @@ build() {
 """
         result = analyze_pkgbuild_safety(pkgbuild)
 
-        assert result["safe"] is False
+        assert result["has_critical_findings"] is True
         # red_flags are dicts with "issue" field
         # Look for "piping curl" or "curl" and "shell" in the message
         assert any("curl" in flag["issue"].lower() and "shell" in flag["issue"].lower() for flag in result["red_flags"])
@@ -241,7 +241,7 @@ build() {
 """
         result = analyze_pkgbuild_safety(pkgbuild)
 
-        assert result["safe"] is False
+        assert result["has_critical_findings"] is True
         assert any("wget" in flag["issue"].lower() for flag in result["red_flags"])
 
     def test_detect_fork_bomb(self):
@@ -253,7 +253,7 @@ build() {
 """
         result = analyze_pkgbuild_safety(pkgbuild)
 
-        assert result["safe"] is False
+        assert result["has_critical_findings"] is True
         assert any("fork bomb" in flag["issue"].lower() for flag in result["red_flags"])
 
     def test_detect_rm_rf_root(self):
@@ -277,7 +277,7 @@ build() {
 """
         result = analyze_pkgbuild_safety(pkgbuild)
 
-        assert result["safe"] is False
+        assert result["has_critical_findings"] is True
         assert any("reverse shell" in flag["issue"].lower() or "/dev/tcp" in flag["issue"] for flag in result["red_flags"])
 
     def test_detect_base64_obfuscation(self):
@@ -302,7 +302,7 @@ build() {
 """
         result = analyze_pkgbuild_safety(pkgbuild)
 
-        assert result["safe"] is False
+        assert result["has_critical_findings"] is True
         # Should detect either cryptocurrency mining or suspicious downloads
         assert len(result["red_flags"]) > 0 or len(result["warnings"]) > 0
 

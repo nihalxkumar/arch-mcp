@@ -827,51 +827,59 @@ async def install_package_secure(
     # ========================================================================
     # STEP 3: Fetch and analyze PKGBUILD
     # ========================================================================
-    logger.info(f"[STEP 4/5] Fetching and analyzing PKGBUILD for security issues...")
-    result["messages"].append("🔍 Fetching PKGBUILD for security analysis...")
-    
+    logger.info(f"[STEP 4/5] Fetching and analyzing the build recipe...")
+    result["messages"].append("🔍 Fetching build recipe for analysis...")
+
     try:
         pkgbuild_content = await get_pkgbuild(package_name)
         result["messages"].append(f"✅ PKGBUILD fetched ({len(pkgbuild_content)} bytes)")
-        
-        # Analyze PKGBUILD for security issues
-        result["messages"].append("🛡️  Analyzing PKGBUILD for security threats...")
-        pkgbuild_analysis = analyze_pkgbuild_safety(pkgbuild_content)
-        result["security_checks"]["pkgbuild_analysis"] = pkgbuild_analysis
-        result["messages"].append(f"🛡️  Risk Score: {pkgbuild_analysis['risk_score']}/100")
-        result["messages"].append(f"   {pkgbuild_analysis['recommendation']}")
-        
-        # Log findings
-        if pkgbuild_analysis["red_flags"]:
-            result["messages"].append(f"   🚨 {len(pkgbuild_analysis['red_flags'])} CRITICAL issues found!")
-            for flag in pkgbuild_analysis["red_flags"][:3]:  # Show first 3
+
+        # The .install file runs as root at install time and is a favourite
+        # place to hide behaviour that a PKGBUILD-only scan would never see.
+        # It is optional, so a 404 here is normal.
+        install_content = ""
+        for candidate in (f"{package_name}.install", ".install"):
+            try:
+                install_content = await get_aur_file(package_name, candidate)
+                result["messages"].append(
+                    f"✅ {candidate} fetched ({len(install_content)} bytes) - "
+                    "this runs as root at install time"
+                )
+                result["security_checks"]["install_file"] = candidate
+                break
+            except ValueError:
+                continue
+
+        if not install_content:
+            result["messages"].append("ℹ️  No .install file in this package")
+
+        # Scan both files together; findings from the .install script matter at
+        # least as much as findings in the PKGBUILD.
+        analysis = analyze_pkgbuild_safety(pkgbuild_content + "\n" + install_content)
+        result["security_checks"]["pkgbuild_analysis"] = analysis
+        result["messages"].append(f"🛡️  Risk Score: {analysis['risk_score']}/100")
+        result["messages"].append(f"   {analysis['recommendation']}")
+
+        if analysis["red_flags"]:
+            result["messages"].append(
+                f"   🚨 {len(analysis['red_flags'])} critical pattern(s) matched:"
+            )
+            for flag in analysis["red_flags"][:3]:
                 result["messages"].append(f"      - Line {flag['line']}: {flag['issue']}")
-        
-        if pkgbuild_analysis["warnings"]:
-            result["messages"].append(f"   ⚠️  {len(pkgbuild_analysis['warnings'])} warnings found")
-        
-        # Check if package is safe to install
-        if not pkgbuild_analysis["safe"]:
-            result["messages"].append("❌ INSTALLATION BLOCKED - Security analysis failed")
-            result["messages"].append("   Package has critical security issues and will NOT be installed")
-            result["security_checks"]["decision"] = "BLOCKED"
-            result["security_checks"]["reason"] = "Critical security issues detected in PKGBUILD"
-            logger.warning(f"Installation blocked for {package_name} due to security issues")
-            return result
-        
-        # Additional check for high-risk warnings
-        if len(pkgbuild_analysis["warnings"]) >= 5:
-            result["messages"].append("⚠️  HIGH RISK - Multiple suspicious patterns detected")
-            result["messages"].append("   Manual review recommended before installation")
-            result["security_checks"]["decision"] = "REVIEW_RECOMMENDED"
-        
+
+        if analysis["warnings"]:
+            result["messages"].append(
+                f"   ⚠️  {len(analysis['warnings'])} suspicious pattern(s) matched"
+            )
+
     except ValueError as e:
-        logger.error(f"Failed to fetch PKGBUILD: {e}")
+        logger.error(f"Failed to fetch build recipe: {e}")
         return create_error_response(
             "FetchError",
-            f"Failed to fetch PKGBUILD for security analysis: {str(e)}"
+            f"Failed to fetch the build recipe for analysis: {str(e)}"
         )
-    
+
+
     # ========================================================================
     # STEP 4: Hand the AUR package back to the user for installation
     # ========================================================================
@@ -994,19 +1002,16 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
         
         # Suspicious permissions and ownership
         (r"chmod\s+[0-7]*7[0-7]*7", "Dangerous: world-writable permissions"),
-        (r"chown\s+root", "Suspicious: changing ownership to root"),
         (r"chmod\s+[u+]*s", "Suspicious: setuid/setgid (privilege escalation risk)"),
         
         # Suspicious file operations
         (r"mktemp.*&&.*chmod", "Suspicious: temp file creation with permission change"),
-        (r">/dev/null\s+2>&1", "Suspicious: suppressing all output (hiding activity)"),
         (r"nohup.*&", "Suspicious: background process that persists"),
         
         # Network activity
         (r"curl.*-s.*-o", "Network: silent download detected"),
         (r"wget.*-q.*-O", "Network: quiet download detected"),
         (r"nc\s+-l", "Network: netcat listening mode (potential backdoor)"),
-        (r"socat", "Network: socat usage (advanced networking tool)"),
         (r"ssh.*-R\s+\d+:", "Network: SSH reverse tunnel detected"),
         
         # Data exfiltration
@@ -1015,18 +1020,12 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
         (r"scp.*-r.*\*", "Data exfiltration: recursive SCP"),
         
         # Systemd/init manipulation
-        (r"systemctl.*enable.*\.service", "System: enabling systemd service"),
-        (r"/etc/systemd/system/", "System: systemd unit file modification"),
         (r"update-rc\.d", "System: SysV init modification"),
         (r"@reboot", "System: cron job at reboot"),
         
         # Kernel module manipulation
-        (r"modprobe", "System: kernel module loading"),
-        (r"insmod", "System: kernel module insertion"),
-        (r"/lib/modules/", "System: kernel module directory access"),
         
         # Compiler/build chain manipulation
-        (r"gcc.*-fPIC.*-shared", "Build: creating shared library (could be malicious)"),
         (r"LD_PRELOAD=", "Build: LD_PRELOAD manipulation (function hijacking)"),
     ]
     
@@ -1035,6 +1034,15 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     # ========================================================================
     info_patterns = [
         (r"sudo\s+", "Info: sudo usage detected"),
+        (r"chown\s+root", "Info: changing ownership to root"),
+        (r">/dev/null\s+2>&1", "Info: output suppressed"),
+        (r"systemctl.*enable.*\.service", "Info: enabling systemd service"),
+        (r"/etc/systemd/system/", "Info: systemd unit file modification"),
+        (r"modprobe", "Info: kernel module loading"),
+        (r"insmod", "Info: kernel module insertion"),
+        (r"/lib/modules/", "Info: kernel module directory access"),
+        (r"gcc.*-fPIC.*-shared", "Info: builds a shared library"),
+        (r"socat", "Info: socat usage (advanced networking tool)"),
         (r"git\s+clone", "Info: git clone detected"),
         (r"make\s+install", "Info: make install detected"),
         (r"pip\s+install", "Info: pip install detected"),
@@ -1088,6 +1096,7 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     # ========================================================================
     source_urls = re.findall(r'source=\([^)]+\)|source_\w+=\([^)]+\)', pkgbuild_content, re.MULTILINE)
     suspicious_domains = []
+    source_hosts = []  # every source URL seen, for the upstream-host comparison below
     
     # Known suspicious TLDs and patterns
     suspicious_tlds = ['.tk', '.ml', '.ga', '.cf', '.gq', '.cn', '.ru']
@@ -1100,7 +1109,8 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     for source_block in source_urls:
         # Extract URLs from source array
         urls = re.findall(r'https?://[^\s\'"]+', source_block)
-        
+        source_hosts.extend(urls)
+
         for url in urls:
             try:
                 parsed = urlparse(url)
@@ -1142,44 +1152,109 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
             })
     
     # ========================================================================
+    # INTEGRITY OF THE SOURCES
+    # ========================================================================
+    # These say more about whether a build can be trusted than most of the
+    # pattern matching above, and the original scanner did not look for them.
+
+    # Checksums set to SKIP mean the downloaded source is never verified, so
+    # whatever the URL serves at build time is what gets built.
+    for i, line in enumerate(lines, 1):
+        if re.match(r"^\s*(md5|sha1|sha224|sha256|sha384|sha512|b2)sums", line):
+            if "SKIP" in line:
+                warnings.append({
+                    "line": i,
+                    "content": line.strip()[:100],
+                    "issue": "Checksum set to SKIP: this source is not verified at build time",
+                    "severity": "WARNING"
+                })
+
+    # A VCS source without a fixed commit builds whatever the branch points at
+    # today, so a reviewed recipe does not imply reviewed code.
+    for i, line in enumerate(lines, 1):
+        for vcs in ("git+", "svn+", "hg+", "bzr+"):
+            if vcs in line:
+                if not re.search(r"#(commit|tag|revision)=", line):
+                    warnings.append({
+                        "line": i,
+                        "content": line.strip()[:100],
+                        "issue": (
+                            f"{vcs.rstrip('+')} source is not pinned to a commit or tag; "
+                            "the build follows the upstream branch"
+                        ),
+                        "severity": "WARNING"
+                    })
+
+    # A source host that differs from the declared upstream url= is worth a look.
+    url_match = re.search(r"^\s*url=[\"\']?([^\"\'\s]+)", pkgbuild_content, re.MULTILINE)
+    if url_match:
+        try:
+            upstream_host = urlparse(url_match.group(1)).netloc.lower().removeprefix("www.")
+            for host in {urlparse(u).netloc.lower().removeprefix("www.") for u in source_hosts}:
+                if host and upstream_host and host != upstream_host:
+                    info.append({
+                        "line": 0,
+                        "content": host,
+                        "issue": (
+                            f"Source host {host} differs from the declared upstream "
+                            f"{upstream_host}"
+                        ),
+                        "severity": "INFO"
+                    })
+        except Exception as e:
+            logger.debug(f"Failed to compare source hosts: {e}")
+
+    # ========================================================================
     # CALCULATE RISK SCORE
     # ========================================================================
     # Risk scoring: red_flags = 50 points each, warnings = 5 points each, cap at 100
     risk_score = min(100, (len(red_flags) * 50) + (len(warnings) * 5))
-    
+
     # ========================================================================
     # GENERATE RECOMMENDATION
     # ========================================================================
+    # Deliberately not a verdict. This function reports what it matched; it does
+    # not certify a package, and nothing in this server may install on the
+    # strength of its output. A PKGBUILD scan cannot see the .install script,
+    # the upstream sources, or anything the build fetches while it runs, and
+    # every pattern here is defeated by ordinary shell quoting or a variable.
     if len(red_flags) > 0:
-        recommendation = "❌ DANGEROUS - Critical security issues detected. DO NOT INSTALL."
-        safe = False
+        recommendation = "❌ Critical patterns matched. Do not install without reading the recipe yourself."
     elif len(warnings) >= 5:
-        recommendation = "⚠️  HIGH RISK - Multiple suspicious patterns detected. Review carefully before installing."
-        safe = False
+        recommendation = "⚠️  Many suspicious patterns matched. Read the recipe carefully."
     elif len(warnings) > 0:
-        recommendation = "⚠️  CAUTION - Some suspicious patterns detected. Manual review recommended."
-        safe = True  # Technically safe but needs review
+        recommendation = "⚠️  Some suspicious patterns matched. Read the recipe before installing."
     else:
-        recommendation = "✅ SAFE - No critical issues detected. Standard review still recommended."
-        safe = True
-    
+        recommendation = (
+            "No known-bad patterns matched. This is not evidence that the package "
+            "is safe: read the PKGBUILD, .install and sources yourself."
+        )
+
     logger.info(f"PKGBUILD analysis complete: {len(red_flags)} red flags, {len(warnings)} warnings, risk score: {risk_score}")
-    
+
     return {
-        "safe": safe,
+        # Named for what it is -- whether anything matched -- so it cannot be
+        # mistaken for a clean bill of health.
+        "has_critical_findings": len(red_flags) > 0,
         "red_flags": red_flags,
         "warnings": warnings,
         "info": info,
         "risk_score": risk_score,
-         "suspicious_domains": list(set(suspicious_domains)),
-         "recommendation": recommendation,
-         "summary": {
-             "total_red_flags": len(red_flags),
-             "total_warnings": len(warnings),
-             "total_info": len(info),
-             "lines_analyzed": len(lines)
-         }
-     }
+        "suspicious_domains": list(set(suspicious_domains)),
+        "recommendation": recommendation,
+        "limitations": (
+            "Static pattern match over the PKGBUILD only. Does not cover the "
+            ".install script, patches, upstream source contents, or anything "
+            "fetched during the build. Obfuscation defeats it. A clean result "
+            "is not an assurance of safety."
+        ),
+        "summary": {
+            "total_red_flags": len(red_flags),
+            "total_warnings": len(warnings),
+            "total_info": len(info),
+            "lines_analyzed": len(lines)
+        }
+    }
 
 
 async def audit_package_security(
@@ -1203,8 +1278,8 @@ async def audit_package_security(
     if action == "pkgbuild_analysis":
         if not pkgbuild_content:
             return create_error_response(
-                "pkgbuild_content is required for pkgbuild_analysis",
-                error_type="validation_error"
+                "ValidationError",
+                "pkgbuild_content is required for pkgbuild_analysis"
             )
         result = analyze_pkgbuild_safety(pkgbuild_content)
         result["action"] = "pkgbuild_analysis"
@@ -1213,29 +1288,34 @@ async def audit_package_security(
     elif action == "metadata_risk":
         if not package_name and not package_info:
             return create_error_response(
-                "Either package_name or package_info is required for metadata_risk",
-                error_type="validation_error"
+                "ValidationError",
+                "Either package_name or package_info is required for metadata_risk"
             )
         
         if package_info:
             result = analyze_package_metadata_risk(package_info)
         else:
-            # Fetch package info first
+            # Fetch package info first. search_aur wraps its payload in the AUR
+            # safety warning, so the results live under "data".
             search_result = await search_aur(package_name, limit=1)
-            if "error" in search_result or not search_result.get("results"):
+            payload = search_result.get("data", search_result)
+            if search_result.get("error") or not payload.get("results"):
                 return create_error_response(
-                    f"Could not find package '{package_name}' in AUR",
-                    error_type="not_found"
+                    "NotFound",
+                    f"Could not find package '{package_name}' in AUR"
                 )
-            result = analyze_package_metadata_risk(search_result["results"][0])
-        
+            result = analyze_package_metadata_risk(payload["results"][0])
+
         result["action"] = "metadata_risk"
-        return add_aur_warning(result)
+        # Attach the AUR warning as a sibling key rather than wrapping the
+        # payload, so both actions of this tool return the same shape.
+        result["warning"] = add_aur_warning({})["warning"]
+        return result
     
     else:
         return create_error_response(
-            f"Unknown action: {action}",
-            error_type="validation_error"
+            "ValidationError",
+            f"Unknown action: {action}"
         )
 
 
