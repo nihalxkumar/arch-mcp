@@ -11,6 +11,7 @@ import json
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+import jsonschema
 from mcp.server import Server
 from mcp.types import (
     Resource,
@@ -1146,6 +1147,51 @@ def _validate_tool_arguments(arguments: dict[str, Any]) -> Optional[dict]:
     return None
 
 
+# Declared input schemas, built once from the tool list on first use.
+_TOOL_SCHEMAS: Optional[dict[str, Any]] = None
+
+
+async def _validate_argument_types(name: str, arguments: dict[str, Any]) -> Optional[dict]:
+    """
+    Check arguments against the schema the tool declares.
+
+    The MCP SDK already does this, but only for requests arriving through its
+    own handler: @server.call_tool() returns the undecorated function, and the
+    HTTP transport imports and calls that directly with the raw JSON body.
+    Types are a safety property here rather than a tidiness one -- the
+    destructive tools gate on ``confirm``, and Python truthiness reads the
+    string "false" as True, so an unchecked argument turns a dry run into a
+    pacman run. Validating at dispatch covers every caller.
+
+    Args:
+        name: Tool being called.
+        arguments: Raw tool arguments from the client.
+
+    Returns:
+        A structured error response if the arguments do not match the tool's
+        schema, otherwise None.
+    """
+    global _TOOL_SCHEMAS
+
+    if _TOOL_SCHEMAS is None:
+        _TOOL_SCHEMAS = {tool.name: tool.inputSchema for tool in await list_tools()}
+
+    schema = _TOOL_SCHEMAS.get(name)
+    if schema is None:
+        return None
+
+    try:
+        jsonschema.validate(instance=arguments or {}, schema=schema)
+    except jsonschema.ValidationError as e:
+        # json_path names the offending argument ('$.confirm'); the message
+        # alone would only say what was wrong with it, not which one it was.
+        detail = f"{e.json_path}: {e.message}"
+        logger.warning(f"Rejected arguments for {name}: {detail}")
+        return create_error_response("ValidationError", f"{name}: {detail}")
+
+    return None
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | ImageContent | EmbeddedResource]:
     """
@@ -1162,6 +1208,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         ValueError: If tool name is unknown
     """
     logger.info(f"Calling tool: {name} with args: {arguments}")
+
+    # Types first: the checks below, and the handlers themselves, read flags
+    # like confirm with Python truthiness.
+    type_error = await _validate_argument_types(name, arguments)
+    if type_error:
+        return [TextContent(type="text", text=json.dumps(type_error, indent=2))]
 
     # Second validation layer. The individual modules validate their own inputs,
     # but doing it here as well means a tool added later cannot reach a

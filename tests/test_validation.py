@@ -8,6 +8,7 @@ parsing: a "package name" that begins with '-' is a flag, not a target.
 """
 
 import asyncio
+import json
 from unittest.mock import patch
 
 import pytest
@@ -221,6 +222,49 @@ class TestConfirmationGates:
 
         assert result["installed"] is False
         assert result["security_checks"]["decision"] == "MANUAL_INSTALL_REQUIRED"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("confirm", ["false", "no", "0", []])
+    async def test_dispatch_rejects_a_non_boolean_confirm(self, confirm):
+        """
+        A confirm that is not a JSON boolean must be refused, not believed.
+
+        The handlers gate on truthiness, so the string "false" would read as
+        True and remove the packages. The SDK validates arguments on its own
+        request path, but the HTTP transport imports this function directly,
+        so the check has to live here to cover both.
+        """
+        from arch_ops_server.server import call_tool
+
+        async def fail(*args, **kwargs):
+            raise AssertionError(f"must not spawn a subprocess: {args}")
+
+        with patch("asyncio.create_subprocess_exec", new=fail):
+            content = await call_tool(
+                "remove_packages", {"packages": "firefox", "confirm": confirm}
+            )
+
+        result = json.loads(content[0].text)
+        assert result["error"] is True
+        assert result["type"] == "ValidationError"
+        assert "confirm" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_still_accepts_a_real_boolean(self):
+        """The type check must not break the ordinary dry-run call."""
+        from arch_ops_server.server import call_tool
+
+        async def fail(*args, **kwargs):
+            raise AssertionError(f"must not spawn a subprocess: {args}")
+
+        with patch("asyncio.create_subprocess_exec", new=fail):
+            content = await call_tool(
+                "remove_packages", {"packages": "firefox", "confirm": False}
+            )
+
+        result = json.loads(content[0].text)
+        assert result["removed"] is False
+        assert "firefox" in result["command"]
 
     @pytest.mark.asyncio
     async def test_install_still_attempted_without_a_graphical_prompt(self):
