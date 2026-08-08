@@ -20,9 +20,18 @@ async def test_manage_groups_list_groups():
 @pytest.mark.skipif(not IS_ARCH, reason="Arch Linux only")
 async def test_manage_groups_list_packages_in_group():
     """Test listing packages in a specific group."""
-    result = await manage_groups(action="list_packages_in_group", group_name="base-devel")
+    # base-devel is a metapackage rather than a group on current Arch, so pick a
+    # group that actually exists on this system instead of hardcoding one.
+    groups = await manage_groups(action="list_groups")
+    if not groups.get("groups"):
+        pytest.skip("no package groups defined on this system")
+
+    group_name = groups["groups"][0]
+    result = await manage_groups(
+        action="list_packages_in_group", group_name=group_name
+    )
     assert "packages" in result
-    assert result["group"] == "base-devel"
+    assert result["group"] == group_name
     assert "total_packages" in result
     assert isinstance(result["packages"], list)
 

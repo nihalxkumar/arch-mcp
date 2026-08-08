@@ -6,16 +6,20 @@ Provides search, package info, and PKGBUILD retrieval via AUR RPC v5.
 
 import logging
 from typing import Dict, Any, List, Optional, Literal
+from urllib.parse import quote
 import httpx
 from datetime import datetime
 
 from .utils import (
-    create_error_response, 
-    add_aur_warning, 
+    create_error_response,
+    add_aur_warning,
+    find_askpass,
+    format_command,
     get_aur_helper,
     IS_ARCH,
     run_command
 )
+from .validation import ValidationError, validate_package_name
 
 logger = logging.getLogger(__name__)
 
@@ -205,16 +209,22 @@ async def get_aur_file(package_name: str, filename: str = "PKGBUILD") -> str:
         >>> pkgbuild = await get_aur_file("yay", "PKGBUILD")
         >>> srcinfo = await get_aur_file("yay", ".SRCINFO")
     """
+    package_name = validate_package_name(package_name)
+
     logger.info(f"Fetching {filename} for package: {package_name}")
-    
-    # Construct cgit URL for the specific file
+
+    # Construct cgit URL for the specific file.
     # Format: https://aur.archlinux.org/cgit/aur.git/plain/{filename}?h={package_name}
-    base_url = "https://aur.archlinux.org/cgit/aur.git/plain"
-    url = f"{base_url}/{filename}?h={package_name}"
-    
+    # Both components are percent-encoded: an unencoded filename can traverse out
+    # of the intended cgit path, and an unencoded package name can append extra
+    # query parameters.
+    url = f"{AUR_CGIT_BASE_URL}/{quote(filename, safe='')}"
+
     try:
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            response = await client.get(url, follow_redirects=True)
+            response = await client.get(
+                url, params={"h": package_name}, follow_redirects=True
+            )
             response.raise_for_status()
             
             content = response.text
@@ -644,27 +654,35 @@ def _apply_smart_ranking(
         return _apply_smart_ranking(packages, query, "relevance")
 
 
-async def install_package_secure(package_name: str) -> Dict[str, Any]:
+async def install_package_secure(
+    package_name: str,
+    confirm: bool = False
+) -> Dict[str, Any]:
     """
-    Install a package with comprehensive security checks.
-    
-    Workflow:
-    1. Check if package exists in official repos first (safer)
-    2. For AUR packages:
-       a. Fetch package metadata and analyze trust
-       b. Fetch and analyze PKGBUILD for security issues
-       c. Only proceed if security checks pass
-    3. Check for AUR helper availability (paru > yay)
-    4. Install with --noconfirm if all checks pass
-    
+    Install an official-repository package, or audit an AUR package.
+
+    Nothing is installed unless ``confirm`` is True. The default is a dry run
+    that reports what would happen and the exact command it would use, so the
+    decision to touch the system is always a separate, visible step.
+
+    AUR packages are never installed here at any confirm level. A regex scan of
+    a PKGBUILD cannot establish that a build is safe -- it does not see the
+    .install file, the upstream sources, or anything the build fetches at build
+    time -- so this returns the audit and the command for the user to run under
+    their AUR helper's own diff review.
+
     Args:
-        package_name: Package name to install
-    
+        package_name: Package name to install.
+        confirm: Must be True to actually install an official-repository
+                 package. Ignored for AUR packages, which are never installed.
+
     Returns:
-        Dict with installation status and security analysis
+        Dict with the audit, the planned command, and installation status.
     """
-    logger.info(f"Starting secure installation workflow for: {package_name}")
-    
+    logger.info(
+        f"Starting installation workflow for: {package_name} (confirm={confirm})"
+    )
+
     # Only supported on Arch Linux
     if not IS_ARCH:
         return create_error_response(
@@ -672,49 +690,43 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
             "Package installation is only supported on Arch Linux systems",
             "This server is not running on Arch Linux"
         )
-    
+
+    try:
+        package_name = validate_package_name(package_name)
+    except ValidationError as e:
+        return create_error_response("ValidationError", str(e))
+
+
     result = {
         "package": package_name,
         "installed": False,
+        "confirm": confirm,
         "security_checks": {},
         "messages": []
     }
-    
+
     # ========================================================================
-    # STEP 0: Verify sudo is configured properly
+    # STEP 0: Note whether a graphical password prompt is available
     # ========================================================================
-    logger.info("[STEP 0/5] Verifying sudo configuration...")
-    
-    # Test if sudo password is cached or passwordless sudo is configured
-    # Use skip_sudo_check=True to avoid recursive check
-    test_exit_code, _, test_stderr = await run_command(
-        ["sudo", "-n", "true"],
-        timeout=5,
-        check=False,
-        skip_sudo_check=True
-    )
-    
-    if test_exit_code != 0:
-        result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
-        result["messages"].append("")
-        result["messages"].append("Package installation requires sudo privileges.")
-        result["messages"].append("Please choose one of these options:")
-        result["messages"].append("")
-        result["messages"].append("Option 1: Configure passwordless sudo for pacman:")
-        result["messages"].append("  sudo visudo -f /etc/sudoers.d/arch-package-install")
-        result["messages"].append("  Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
-        result["messages"].append("")
-        result["messages"].append("Option 2: Cache sudo password temporarily:")
-        result["messages"].append("  Run: sudo -v")
-        result["messages"].append("  Then retry the installation")
-        result["messages"].append("")
-        result["messages"].append("Option 3: Install manually in terminal:")
-        result["messages"].append(f"  sudo pacman -S {package_name}")
-        result["security_checks"]["decision"] = "SUDO_REQUIRED"
-        return result
-    
-    result["messages"].append("✅ Sudo privileges verified")
-    
+    # Only a warning, never a refusal. Without a helper, run_command falls back
+    # to `sudo -n`, which still succeeds for a user with a valid sudo timestamp
+    # and otherwise reports how to proceed. Refusing here would make this tool
+    # unusable over SSH or on a headless machine, where every other privileged
+    # tool in this server keeps working.
+    if confirm and not find_askpass():
+        logger.info("No askpass helper available; sudo will be attempted non-interactively")
+        result["messages"].append("⚠️  No graphical password prompt is available.")
+        result["messages"].append("   sudo will be attempted non-interactively, which works if")
+        result["messages"].append("   your sudo credentials are still valid. If they are not,")
+        result["messages"].append("   install an askpass helper for your desktop and retry:")
+        result["messages"].append("     GNOME: pacman -S seahorse")
+        result["messages"].append("     KDE:   pacman -S ksshaskpass")
+        result["messages"].append("     LXQt:  pacman -S lxqt-openssh-askpass")
+        result["messages"].append("     Other: pacman -S x11-ssh-askpass")
+        result["messages"].append("   ...or run the install in your own terminal. Do not add a")
+        result["messages"].append("   passwordless sudo rule to work around this; it would let")
+        result["messages"].append("   any tool call reach root with no confirmation.")
+
     # ========================================================================
     # STEP 1: Check if package is in official repos first
     # ========================================================================
@@ -732,16 +744,29 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
         result["security_checks"]["source"] = "official_repository"
         result["security_checks"]["risk_level"] = "LOW"
         result["security_checks"]["recommendation"] = "✅ SAFE - Official repository package"
-        
-        # Install using sudo pacman -S --noconfirm
+
+        # The command this call would run, reported either way so the user can
+        # see exactly what was or would be executed.
+        install_cmd = ["sudo", "pacman", "-S", "--needed", "--noconfirm", "--", package_name]
+        result["command"] = format_command(install_cmd)
+
+        if not confirm:
+            result["messages"].append("⏸️  Not installed: this was a dry run.")
+            result["messages"].append(
+                f"   To install, call this tool again with confirm=true: {result['command']}"
+            )
+            result["security_checks"]["decision"] = "CONFIRMATION_REQUIRED"
+            logger.info(f"Dry run for official package {package_name}; nothing installed")
+            return result
+
         try:
             result["messages"].append("📦 Installing from official repository...")
             exit_code, stdout, stderr = await run_command(
-                ["sudo", "pacman", "-S", "--noconfirm", package_name],
+                install_cmd,
                 timeout=300,  # 5 minutes for installation
                 check=False
             )
-            
+
             if exit_code == 0:
                 result["installed"] = True
                 result["messages"].append(f"✅ Successfully installed {package_name} from official repository")
@@ -753,14 +778,11 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
                 # Check for sudo password issues
                 if "password" in stderr.lower() or "sudo" in stderr.lower():
                     result["messages"].append("")
-                    result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
-                    result["messages"].append("To enable passwordless installation, run one of these commands:")
-                    result["messages"].append("1. For passwordless sudo (less secure):")
-                    result["messages"].append("   sudo visudo -f /etc/sudoers.d/arch-package-install")
-                    result["messages"].append("   Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
-                    result["messages"].append("2. Or run the installation manually in your terminal:")
+                    result["messages"].append("⚠️  AUTHENTICATION FAILED")
+                    result["messages"].append("The password prompt was cancelled or the password was wrong.")
+                    result["messages"].append("Retry, or run the installation in your own terminal:")
                     result["messages"].append(f"   sudo pacman -S {package_name}")
-                
+
             result["install_output"] = stdout
             result["install_errors"] = stderr
             
@@ -805,114 +827,93 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
     # ========================================================================
     # STEP 3: Fetch and analyze PKGBUILD
     # ========================================================================
-    logger.info(f"[STEP 4/5] Fetching and analyzing PKGBUILD for security issues...")
-    result["messages"].append("🔍 Fetching PKGBUILD for security analysis...")
-    
+    logger.info(f"[STEP 4/5] Fetching and analyzing the build recipe...")
+    result["messages"].append("🔍 Fetching build recipe for analysis...")
+
     try:
         pkgbuild_content = await get_pkgbuild(package_name)
         result["messages"].append(f"✅ PKGBUILD fetched ({len(pkgbuild_content)} bytes)")
-        
-        # Analyze PKGBUILD for security issues
-        result["messages"].append("🛡️  Analyzing PKGBUILD for security threats...")
-        pkgbuild_analysis = analyze_pkgbuild_safety(pkgbuild_content)
-        result["security_checks"]["pkgbuild_analysis"] = pkgbuild_analysis
-        result["messages"].append(f"🛡️  Risk Score: {pkgbuild_analysis['risk_score']}/100")
-        result["messages"].append(f"   {pkgbuild_analysis['recommendation']}")
-        
-        # Log findings
-        if pkgbuild_analysis["red_flags"]:
-            result["messages"].append(f"   🚨 {len(pkgbuild_analysis['red_flags'])} CRITICAL issues found!")
-            for flag in pkgbuild_analysis["red_flags"][:3]:  # Show first 3
+
+        # The .install file runs as root at install time and is a favourite
+        # place to hide behaviour that a PKGBUILD-only scan would never see.
+        # It is optional, so a 404 here is normal.
+        install_content = ""
+        for candidate in (f"{package_name}.install", ".install"):
+            try:
+                install_content = await get_aur_file(package_name, candidate)
+                result["messages"].append(
+                    f"✅ {candidate} fetched ({len(install_content)} bytes) - "
+                    "this runs as root at install time"
+                )
+                result["security_checks"]["install_file"] = candidate
+                break
+            except ValueError:
+                continue
+
+        if not install_content:
+            result["messages"].append("ℹ️  No .install file in this package")
+
+        # Scan both files together; findings from the .install script matter at
+        # least as much as findings in the PKGBUILD.
+        analysis = analyze_pkgbuild_safety(pkgbuild_content + "\n" + install_content)
+        result["security_checks"]["pkgbuild_analysis"] = analysis
+        result["messages"].append(f"🛡️  Risk Score: {analysis['risk_score']}/100")
+        result["messages"].append(f"   {analysis['recommendation']}")
+
+        if analysis["red_flags"]:
+            result["messages"].append(
+                f"   🚨 {len(analysis['red_flags'])} critical pattern(s) matched:"
+            )
+            for flag in analysis["red_flags"][:3]:
                 result["messages"].append(f"      - Line {flag['line']}: {flag['issue']}")
-        
-        if pkgbuild_analysis["warnings"]:
-            result["messages"].append(f"   ⚠️  {len(pkgbuild_analysis['warnings'])} warnings found")
-        
-        # Check if package is safe to install
-        if not pkgbuild_analysis["safe"]:
-            result["messages"].append("❌ INSTALLATION BLOCKED - Security analysis failed")
-            result["messages"].append("   Package has critical security issues and will NOT be installed")
-            result["security_checks"]["decision"] = "BLOCKED"
-            result["security_checks"]["reason"] = "Critical security issues detected in PKGBUILD"
-            logger.warning(f"Installation blocked for {package_name} due to security issues")
-            return result
-        
-        # Additional check for high-risk warnings
-        if len(pkgbuild_analysis["warnings"]) >= 5:
-            result["messages"].append("⚠️  HIGH RISK - Multiple suspicious patterns detected")
-            result["messages"].append("   Manual review recommended before installation")
-            result["security_checks"]["decision"] = "REVIEW_RECOMMENDED"
-        
+
+        if analysis["warnings"]:
+            result["messages"].append(
+                f"   ⚠️  {len(analysis['warnings'])} suspicious pattern(s) matched"
+            )
+
     except ValueError as e:
-        logger.error(f"Failed to fetch PKGBUILD: {e}")
+        logger.error(f"Failed to fetch build recipe: {e}")
         return create_error_response(
             "FetchError",
-            f"Failed to fetch PKGBUILD for security analysis: {str(e)}"
+            f"Failed to fetch the build recipe for analysis: {str(e)}"
         )
-    
+
+
     # ========================================================================
-    # STEP 4: Check for AUR helper
+    # STEP 4: Hand the AUR package back to the user for installation
     # ========================================================================
-    logger.info(f"[STEP 5/5] Checking for AUR helper (paru/yay)...")
-    result["messages"].append("🔧 Checking for AUR helper...")
-    
+    # AUR packages are never installed from here. The audit above is a static
+    # scan of one file; it cannot see the .install script, the upstream sources,
+    # or anything the build downloads while it runs. Installing on the strength
+    # of it would turn a weak signal into an unattended root operation.
+    logger.info(f"[STEP 5/5] Reporting AUR install command for {package_name}")
+
     aur_helper = get_aur_helper()
-    
-    if not aur_helper:
-        result["messages"].append("❌ No AUR helper found (paru or yay)")
-        result["messages"].append("   Please install an AUR helper:")
-        result["messages"].append("   - Recommended: paru (pacman -S paru)")
-        result["messages"].append("   - Alternative: yay")
-        result["security_checks"]["decision"] = "NO_HELPER"
-        return result
-    
-    result["messages"].append(f"✅ Using AUR helper: {aur_helper}")
     result["aur_helper"] = aur_helper
-    
-    # ========================================================================
-    # STEP 5: Install package with AUR helper
-    # ========================================================================
-    result["messages"].append(f"📦 Installing {package_name} via {aur_helper} (no confirmation)...")
-    logger.info(f"Installing AUR package {package_name} with {aur_helper}")
-    
-    try:
-        # Install with --noconfirm flag
-        exit_code, stdout, stderr = await run_command(
-            [aur_helper, "-S", "--noconfirm", package_name],
-            timeout=600,  # 10 minutes for AUR package build
-            check=False
-        )
-        
-        if exit_code == 0:
-            result["installed"] = True
-            result["messages"].append(f"✅ Successfully installed {package_name} from AUR")
-            result["security_checks"]["decision"] = "INSTALLED"
-            logger.info(f"Successfully installed AUR package: {package_name}")
-        else:
-            result["messages"].append(f"❌ Installation failed with exit code {exit_code}")
-            result["messages"].append(f"   Error: {stderr}")
-            result["security_checks"]["decision"] = "INSTALL_FAILED"
-            logger.error(f"AUR installation failed for {package_name}: {stderr}")
-            
-            # Check for sudo password issues
-            if "password" in stderr.lower() or "sudo" in stderr.lower():
-                result["messages"].append("")
-                result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
-                result["messages"].append("To enable passwordless installation for AUR packages:")
-                result["messages"].append("1. For passwordless sudo for pacman:")
-                result["messages"].append("   sudo visudo -f /etc/sudoers.d/arch-aur-install")
-                result["messages"].append("   Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
-                result["messages"].append("2. Or run the installation manually in your terminal:")
-                result["messages"].append(f"   {aur_helper} -S {package_name}")
-        
-        result["install_output"] = stdout
-        result["install_errors"] = stderr
-        
-    except Exception as e:
-        logger.error(f"Installation failed: {e}")
-        result["messages"].append(f"❌ Installation exception: {str(e)}")
-        result["security_checks"]["decision"] = "INSTALL_ERROR"
-    
+
+    if aur_helper:
+        result["command"] = format_command([aur_helper, "-S", "--", package_name])
+    else:
+        result["command"] = None
+        result["messages"].append("ℹ️  No AUR helper found (paru or yay).")
+        result["messages"].append("   Install one first: pacman -S paru")
+
+    result["security_checks"]["decision"] = "MANUAL_INSTALL_REQUIRED"
+    result["messages"].append("")
+    result["messages"].append("⏸️  AUR packages are not installed automatically.")
+    result["messages"].append("   The scan above reads the PKGBUILD only. It does not")
+    result["messages"].append("   cover the .install script, the upstream sources, or")
+    result["messages"].append("   anything fetched during the build, so it cannot show")
+    result["messages"].append("   that this package is safe.")
+
+    if aur_helper:
+        result["messages"].append("")
+        result["messages"].append("   Review the recipe and install it in your own terminal:")
+        result["messages"].append(f"     {result['command']}")
+        result["messages"].append("   Keep your helper's diff review enabled and read the")
+        result["messages"].append("   PKGBUILD and .install files before approving the build.")
+
     return result
 
 
@@ -1001,19 +1002,16 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
         
         # Suspicious permissions and ownership
         (r"chmod\s+[0-7]*7[0-7]*7", "Dangerous: world-writable permissions"),
-        (r"chown\s+root", "Suspicious: changing ownership to root"),
         (r"chmod\s+[u+]*s", "Suspicious: setuid/setgid (privilege escalation risk)"),
         
         # Suspicious file operations
         (r"mktemp.*&&.*chmod", "Suspicious: temp file creation with permission change"),
-        (r">/dev/null\s+2>&1", "Suspicious: suppressing all output (hiding activity)"),
         (r"nohup.*&", "Suspicious: background process that persists"),
         
         # Network activity
         (r"curl.*-s.*-o", "Network: silent download detected"),
         (r"wget.*-q.*-O", "Network: quiet download detected"),
         (r"nc\s+-l", "Network: netcat listening mode (potential backdoor)"),
-        (r"socat", "Network: socat usage (advanced networking tool)"),
         (r"ssh.*-R\s+\d+:", "Network: SSH reverse tunnel detected"),
         
         # Data exfiltration
@@ -1022,18 +1020,12 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
         (r"scp.*-r.*\*", "Data exfiltration: recursive SCP"),
         
         # Systemd/init manipulation
-        (r"systemctl.*enable.*\.service", "System: enabling systemd service"),
-        (r"/etc/systemd/system/", "System: systemd unit file modification"),
         (r"update-rc\.d", "System: SysV init modification"),
         (r"@reboot", "System: cron job at reboot"),
         
         # Kernel module manipulation
-        (r"modprobe", "System: kernel module loading"),
-        (r"insmod", "System: kernel module insertion"),
-        (r"/lib/modules/", "System: kernel module directory access"),
         
         # Compiler/build chain manipulation
-        (r"gcc.*-fPIC.*-shared", "Build: creating shared library (could be malicious)"),
         (r"LD_PRELOAD=", "Build: LD_PRELOAD manipulation (function hijacking)"),
     ]
     
@@ -1042,6 +1034,15 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     # ========================================================================
     info_patterns = [
         (r"sudo\s+", "Info: sudo usage detected"),
+        (r"chown\s+root", "Info: changing ownership to root"),
+        (r">/dev/null\s+2>&1", "Info: output suppressed"),
+        (r"systemctl.*enable.*\.service", "Info: enabling systemd service"),
+        (r"/etc/systemd/system/", "Info: systemd unit file modification"),
+        (r"modprobe", "Info: kernel module loading"),
+        (r"insmod", "Info: kernel module insertion"),
+        (r"/lib/modules/", "Info: kernel module directory access"),
+        (r"gcc.*-fPIC.*-shared", "Info: builds a shared library"),
+        (r"socat", "Info: socat usage (advanced networking tool)"),
         (r"git\s+clone", "Info: git clone detected"),
         (r"make\s+install", "Info: make install detected"),
         (r"pip\s+install", "Info: pip install detected"),
@@ -1095,6 +1096,7 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     # ========================================================================
     source_urls = re.findall(r'source=\([^)]+\)|source_\w+=\([^)]+\)', pkgbuild_content, re.MULTILINE)
     suspicious_domains = []
+    source_hosts = []  # every source URL seen, for the upstream-host comparison below
     
     # Known suspicious TLDs and patterns
     suspicious_tlds = ['.tk', '.ml', '.ga', '.cf', '.gq', '.cn', '.ru']
@@ -1107,7 +1109,8 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
     for source_block in source_urls:
         # Extract URLs from source array
         urls = re.findall(r'https?://[^\s\'"]+', source_block)
-        
+        source_hosts.extend(urls)
+
         for url in urls:
             try:
                 parsed = urlparse(url)
@@ -1149,44 +1152,109 @@ def analyze_pkgbuild_safety(pkgbuild_content: str) -> Dict[str, Any]:
             })
     
     # ========================================================================
+    # INTEGRITY OF THE SOURCES
+    # ========================================================================
+    # These say more about whether a build can be trusted than most of the
+    # pattern matching above, and the original scanner did not look for them.
+
+    # Checksums set to SKIP mean the downloaded source is never verified, so
+    # whatever the URL serves at build time is what gets built.
+    for i, line in enumerate(lines, 1):
+        if re.match(r"^\s*(md5|sha1|sha224|sha256|sha384|sha512|b2)sums", line):
+            if "SKIP" in line:
+                warnings.append({
+                    "line": i,
+                    "content": line.strip()[:100],
+                    "issue": "Checksum set to SKIP: this source is not verified at build time",
+                    "severity": "WARNING"
+                })
+
+    # A VCS source without a fixed commit builds whatever the branch points at
+    # today, so a reviewed recipe does not imply reviewed code.
+    for i, line in enumerate(lines, 1):
+        for vcs in ("git+", "svn+", "hg+", "bzr+"):
+            if vcs in line:
+                if not re.search(r"#(commit|tag|revision)=", line):
+                    warnings.append({
+                        "line": i,
+                        "content": line.strip()[:100],
+                        "issue": (
+                            f"{vcs.rstrip('+')} source is not pinned to a commit or tag; "
+                            "the build follows the upstream branch"
+                        ),
+                        "severity": "WARNING"
+                    })
+
+    # A source host that differs from the declared upstream url= is worth a look.
+    url_match = re.search(r"^\s*url=[\"\']?([^\"\'\s]+)", pkgbuild_content, re.MULTILINE)
+    if url_match:
+        try:
+            upstream_host = urlparse(url_match.group(1)).netloc.lower().removeprefix("www.")
+            for host in {urlparse(u).netloc.lower().removeprefix("www.") for u in source_hosts}:
+                if host and upstream_host and host != upstream_host:
+                    info.append({
+                        "line": 0,
+                        "content": host,
+                        "issue": (
+                            f"Source host {host} differs from the declared upstream "
+                            f"{upstream_host}"
+                        ),
+                        "severity": "INFO"
+                    })
+        except Exception as e:
+            logger.debug(f"Failed to compare source hosts: {e}")
+
+    # ========================================================================
     # CALCULATE RISK SCORE
     # ========================================================================
     # Risk scoring: red_flags = 50 points each, warnings = 5 points each, cap at 100
     risk_score = min(100, (len(red_flags) * 50) + (len(warnings) * 5))
-    
+
     # ========================================================================
     # GENERATE RECOMMENDATION
     # ========================================================================
+    # Deliberately not a verdict. This function reports what it matched; it does
+    # not certify a package, and nothing in this server may install on the
+    # strength of its output. A PKGBUILD scan cannot see the .install script,
+    # the upstream sources, or anything the build fetches while it runs, and
+    # every pattern here is defeated by ordinary shell quoting or a variable.
     if len(red_flags) > 0:
-        recommendation = "❌ DANGEROUS - Critical security issues detected. DO NOT INSTALL."
-        safe = False
+        recommendation = "❌ Critical patterns matched. Do not install without reading the recipe yourself."
     elif len(warnings) >= 5:
-        recommendation = "⚠️  HIGH RISK - Multiple suspicious patterns detected. Review carefully before installing."
-        safe = False
+        recommendation = "⚠️  Many suspicious patterns matched. Read the recipe carefully."
     elif len(warnings) > 0:
-        recommendation = "⚠️  CAUTION - Some suspicious patterns detected. Manual review recommended."
-        safe = True  # Technically safe but needs review
+        recommendation = "⚠️  Some suspicious patterns matched. Read the recipe before installing."
     else:
-        recommendation = "✅ SAFE - No critical issues detected. Standard review still recommended."
-        safe = True
-    
+        recommendation = (
+            "No known-bad patterns matched. This is not evidence that the package "
+            "is safe: read the PKGBUILD, .install and sources yourself."
+        )
+
     logger.info(f"PKGBUILD analysis complete: {len(red_flags)} red flags, {len(warnings)} warnings, risk score: {risk_score}")
-    
+
     return {
-        "safe": safe,
+        # Named for what it is -- whether anything matched -- so it cannot be
+        # mistaken for a clean bill of health.
+        "has_critical_findings": len(red_flags) > 0,
         "red_flags": red_flags,
         "warnings": warnings,
         "info": info,
         "risk_score": risk_score,
-         "suspicious_domains": list(set(suspicious_domains)),
-         "recommendation": recommendation,
-         "summary": {
-             "total_red_flags": len(red_flags),
-             "total_warnings": len(warnings),
-             "total_info": len(info),
-             "lines_analyzed": len(lines)
-         }
-     }
+        "suspicious_domains": list(set(suspicious_domains)),
+        "recommendation": recommendation,
+        "limitations": (
+            "Static pattern match over the PKGBUILD only. Does not cover the "
+            ".install script, patches, upstream source contents, or anything "
+            "fetched during the build. Obfuscation defeats it. A clean result "
+            "is not an assurance of safety."
+        ),
+        "summary": {
+            "total_red_flags": len(red_flags),
+            "total_warnings": len(warnings),
+            "total_info": len(info),
+            "lines_analyzed": len(lines)
+        }
+    }
 
 
 async def audit_package_security(
@@ -1210,8 +1278,8 @@ async def audit_package_security(
     if action == "pkgbuild_analysis":
         if not pkgbuild_content:
             return create_error_response(
-                "pkgbuild_content is required for pkgbuild_analysis",
-                error_type="validation_error"
+                "ValidationError",
+                "pkgbuild_content is required for pkgbuild_analysis"
             )
         result = analyze_pkgbuild_safety(pkgbuild_content)
         result["action"] = "pkgbuild_analysis"
@@ -1220,29 +1288,34 @@ async def audit_package_security(
     elif action == "metadata_risk":
         if not package_name and not package_info:
             return create_error_response(
-                "Either package_name or package_info is required for metadata_risk",
-                error_type="validation_error"
+                "ValidationError",
+                "Either package_name or package_info is required for metadata_risk"
             )
         
         if package_info:
             result = analyze_package_metadata_risk(package_info)
         else:
-            # Fetch package info first
+            # Fetch package info first. search_aur wraps its payload in the AUR
+            # safety warning, so the results live under "data".
             search_result = await search_aur(package_name, limit=1)
-            if "error" in search_result or not search_result.get("results"):
+            payload = search_result.get("data", search_result)
+            if search_result.get("error") or not payload.get("results"):
                 return create_error_response(
-                    f"Could not find package '{package_name}' in AUR",
-                    error_type="not_found"
+                    "NotFound",
+                    f"Could not find package '{package_name}' in AUR"
                 )
-            result = analyze_package_metadata_risk(search_result["results"][0])
-        
+            result = analyze_package_metadata_risk(payload["results"][0])
+
         result["action"] = "metadata_risk"
-        return add_aur_warning(result)
+        # Attach the AUR warning as a sibling key rather than wrapping the
+        # payload, so both actions of this tool return the same shape.
+        result["warning"] = add_aur_warning({})["warning"]
+        return result
     
     else:
         return create_error_response(
-            f"Unknown action: {action}",
-            error_type="validation_error"
+            "ValidationError",
+            f"Unknown action: {action}"
         )
 
 

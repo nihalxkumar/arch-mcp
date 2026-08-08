@@ -15,5 +15,13 @@ RUN uv pip install --system ".[http]"
 # Expose port for HTTP server (Smithery sets PORT env var, default 8080)
 EXPOSE 8080
 
+# The server binds to localhost by default and refuses to listen on all
+# interfaces without a bearer token, because its tools can run pacman as root.
+# Inside this container Smithery terminates ingress itself, so listening on all
+# interfaces is expected; set ARCH_MCP_AUTH_TOKEN as well if the port is
+# reachable from anywhere untrusted.
+ENV ARCH_MCP_HOST=0.0.0.0
+ENV ARCH_MCP_ALLOW_INSECURE_BIND=1
+
 # Run HTTP server for Smithery
 CMD ["arch-ops-server-http"]
