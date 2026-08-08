@@ -14,7 +14,8 @@ from .utils import (
     IS_ARCH,
     run_command,
     create_error_response,
-    check_command_exists
+    check_command_exists,
+    format_command
 )
 from .validation import (
     ValidationError,
@@ -336,15 +337,23 @@ def _parse_checkupdates_output(output: str) -> List[Dict[str, str]]:
 async def remove_package(
     package_name: str,
     remove_dependencies: bool = False,
-    force: bool = False
+    confirm: bool = False
 ) -> Dict[str, Any]:
     """
     Remove a single package from the system.
 
+    Nothing is removed unless ``confirm`` is True; the default reports the
+    command that would run.
+
+    There is deliberately no force option. ``pacman -Rdd`` skips dependency
+    checking, which from an automated caller is a way to remove glibc or
+    systemd from a running system with no warning. Anyone who genuinely needs
+    it should run it themselves.
+
     Args:
         package_name: Name of package to remove
         remove_dependencies: If True, remove unneeded dependencies (pacman -Rs)
-        force: If True, force removal ignoring dependencies (pacman -Rdd)
+        confirm: Must be True to actually remove the package
 
     Returns:
         Dict with removal status and information
@@ -366,19 +375,27 @@ async def remove_package(
     except ValidationError as e:
         return create_error_response("ValidationError", str(e))
 
-    logger.info(f"Removing package: {package_name} (deps={remove_dependencies}, force={force})")
+    logger.info(
+        f"Removing package: {package_name} "
+        f"(deps={remove_dependencies}, confirm={confirm})"
+    )
 
     # Build command based on options
     cmd = ["sudo", "pacman"]
-
-    if force:
-        cmd.extend(["-Rdd"])  # Force remove, skip dependency checks
-    elif remove_dependencies:
-        cmd.extend(["-Rs"])  # Remove with unused dependencies
-    else:
-        cmd.extend(["-R"])  # Basic removal
-
+    cmd.extend(["-Rs"] if remove_dependencies else ["-R"])
     cmd.extend(["--noconfirm", "--", package_name])
+
+    if not confirm:
+        return {
+            "success": False,
+            "removed": False,
+            "package": package_name,
+            "command": format_command(cmd),
+            "message": (
+                "Not removed: this was a dry run. Call again with confirm=true "
+                "to run the command shown."
+            )
+        }
 
     try:
         exit_code, stdout, stderr = await run_command(
@@ -399,8 +416,10 @@ async def remove_package(
 
         return {
             "success": True,
+            "removed": True,
             "package": package_name,
             "removed_dependencies": remove_dependencies,
+            "command": format_command(cmd),
             "output": stdout
         }
 
@@ -414,14 +433,19 @@ async def remove_package(
 
 async def remove_packages_batch(
     package_names: List[str],
-    remove_dependencies: bool = False
+    remove_dependencies: bool = False,
+    confirm: bool = False
 ) -> Dict[str, Any]:
     """
     Remove multiple packages in a single transaction.
 
+    Nothing is removed unless ``confirm`` is True; the default reports the
+    command that would run.
+
     Args:
         package_names: List of package names to remove
         remove_dependencies: If True, remove unneeded dependencies
+        confirm: Must be True to actually remove the packages
 
     Returns:
         Dict with removal status
@@ -461,6 +485,19 @@ async def remove_packages_batch(
 
     cmd.extend(["--noconfirm", "--"] + package_names)
 
+    if not confirm:
+        return {
+            "success": False,
+            "removed": False,
+            "package_count": len(package_names),
+            "packages": package_names,
+            "command": format_command(cmd),
+            "message": (
+                "Not removed: this was a dry run. Call again with confirm=true "
+                "to run the command shown."
+            )
+        }
+
     try:
         exit_code, stdout, stderr = await run_command(
             cmd,
@@ -479,9 +516,11 @@ async def remove_packages_batch(
 
         return {
             "success": True,
+            "removed": True,
             "package_count": len(package_names),
             "packages": package_names,
             "removed_dependencies": remove_dependencies,
+            "command": format_command(cmd),
             "output": stdout
         }
 
@@ -496,19 +535,22 @@ async def remove_packages_batch(
 async def remove_packages(
     packages: Union[str, List[str]],
     remove_dependencies: bool = False,
-    force: bool = False
+    confirm: bool = False
 ) -> Dict[str, Any]:
     """
     Unified tool for removing packages (single or multiple).
-    
+
     This consolidates two operations:
     - Single package removal (replaces remove_package)
     - Batch package removal (replaces remove_packages_batch)
 
+    Nothing is removed unless ``confirm`` is True; the default reports the
+    command that would run.
+
     Args:
         packages: Package name (string) or list of package names to remove
         remove_dependencies: If True, remove unneeded dependencies (pacman -Rs)
-        force: If True, force removal ignoring dependencies (pacman -Rdd). Only works for single package.
+        confirm: Must be True to actually remove the packages
 
     Returns:
         Dict with removal status and information
@@ -544,22 +586,16 @@ async def remove_packages(
     except ValidationError as e:
         return create_error_response("ValidationError", str(e))
 
-    # Validate force flag usage
-    if force and not is_single:
-        return create_error_response(
-            "ValidationError",
-            "force flag can only be used with single package removal"
-        )
+    logger.info(
+        f"Removing {len(package_list)} package(s): {package_list} "
+        f"(deps={remove_dependencies}, confirm={confirm})"
+    )
 
-    logger.info(f"Removing {len(package_list)} package(s): {package_list} (deps={remove_dependencies}, force={force})")
-
-    # Route to appropriate implementation based on input type and flags
+    # Route to appropriate implementation based on input type
     if is_single:
-        # Single package removal
-        return await remove_package(package_list[0], remove_dependencies, force)
+        return await remove_package(package_list[0], remove_dependencies, confirm)
     else:
-        # Batch package removal (force not supported)
-        return await remove_packages_batch(package_list, remove_dependencies)
+        return await remove_packages_batch(package_list, remove_dependencies, confirm)
 
 
 async def list_orphan_packages() -> Dict[str, Any]:
@@ -624,13 +660,23 @@ async def list_orphan_packages() -> Dict[str, Any]:
         )
 
 
-async def remove_orphans(dry_run: bool = True, exclude: Optional[List[str]] = None) -> Dict[str, Any]:
+async def remove_orphans(
+    dry_run: bool = True,
+    exclude: Optional[List[str]] = None,
+    confirm: bool = False
+) -> Dict[str, Any]:
     """
     Remove all orphaned packages.
+
+    Removal requires both dry_run=False and confirm=True. The set of packages
+    is computed at call time from `pacman -Qtdq`, so the caller cannot see the
+    list in advance -- the dry run exists to show it, and the confirmation to
+    approve it.
 
     Args:
         dry_run: If True, show what would be removed without actually removing
         exclude: List of packages to exclude from removal
+        confirm: Must be True, together with dry_run=False, to remove anything
 
     Returns:
         Dict with removal status
@@ -679,20 +725,37 @@ async def remove_orphans(dry_run: bool = True, exclude: Optional[List[str]] = No
     except ValidationError as e:
         return create_error_response("ValidationError", f"Unexpected orphan package name: {e}")
 
-    logger.info(f"Removing {len(orphans)} orphan packages (dry_run={dry_run})")
+    logger.info(
+        f"Removing {len(orphans)} orphan packages "
+        f"(dry_run={dry_run}, confirm={confirm})"
+    )
+
+    cmd = ["sudo", "pacman", "-Rns", "--noconfirm", "--"] + orphans
 
     if dry_run:
         return {
             "dry_run": True,
+            "removed": False,
             "would_remove_count": len(orphans),
             "packages": orphans,
+            "command": format_command(cmd),
             "message": "This is a dry run. No packages were removed."
         }
 
-    try:
-        # Remove orphans using pacman -Rns
-        cmd = ["sudo", "pacman", "-Rns", "--noconfirm", "--"] + orphans
+    if not confirm:
+        return {
+            "dry_run": False,
+            "removed": False,
+            "would_remove_count": len(orphans),
+            "packages": orphans,
+            "command": format_command(cmd),
+            "message": (
+                "Not removed: confirm=true is required to remove orphans. "
+                "Review the package list above first."
+            )
+        }
 
+    try:
         exit_code, stdout, stderr = await run_command(
             cmd,
             timeout=120,
@@ -726,11 +789,12 @@ async def remove_orphans(dry_run: bool = True, exclude: Optional[List[str]] = No
 async def manage_orphans(
     action: str,
     dry_run: bool = True,
-    exclude: Optional[List[str]] = None
+    exclude: Optional[List[str]] = None,
+    confirm: bool = False
 ) -> Dict[str, Any]:
     """
     Unified tool for managing orphaned packages.
-    
+
     This consolidates two operations:
     - list: List all orphaned packages (replaces list_orphan_packages)
     - remove: Remove orphaned packages (replaces remove_orphans)
@@ -739,6 +803,7 @@ async def manage_orphans(
         action: Action to perform - "list" or "remove"
         dry_run: If True (default), show what would be removed without removing (only for remove action)
         exclude: List of packages to exclude from removal (only for remove action)
+        confirm: Must be True, with dry_run=False, for "remove" to remove anything
 
     Returns:
         Dict with action results
@@ -763,16 +828,18 @@ async def manage_orphans(
             f"Invalid action '{action}'. Must be one of: {', '.join(valid_actions)}"
         )
 
-    logger.info(f"Orphan management: action={action}, dry_run={dry_run}")
+    logger.info(
+        f"Orphan management: action={action}, dry_run={dry_run}, confirm={confirm}"
+    )
 
     # Route to appropriate implementation based on action
     if action == "list":
         # List orphaned packages
         return await list_orphan_packages()
-    
+
     elif action == "remove":
         # Remove orphaned packages
-        return await remove_orphans(dry_run, exclude)
+        return await remove_orphans(dry_run, exclude, confirm)
     
     # This should never be reached due to validation above
     return create_error_response(

@@ -706,13 +706,18 @@ async def list_tools() -> list[Tool]:
         
         Tool(
             name="install_package_secure",
-            description="[LIFECYCLE] Install a package with comprehensive security checks. Workflow: 1. Check official repos first (safer) 2. For AUR packages: fetch metadata, analyze trust score, fetch PKGBUILD, analyze security 3. Block installation if critical security issues found 4. Check for AUR helper (paru > yay) 5. Install with --noconfirm if all checks pass. Only works on Arch Linux. Requires sudo access and paru/yay for AUR packages.",
+            description="[LIFECYCLE] Install an official-repository package, or audit an AUR package. Defaults to a dry run: with confirm=false (the default) it reports what it would do and the exact command, and installs nothing. Pass confirm=true only after the user has agreed to the specific package. AUR packages are NEVER installed by this tool at any confirm value - it returns the audit plus the command for the user to run under their AUR helper's own diff review, because a PKGBUILD scan cannot see the .install script, the upstream sources, or anything the build fetches while it runs. Only works on Arch Linux. Prompts for the sudo password via a graphical askpass helper.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "package_name": {
                         "type": "string",
                         "description": "Name of package to install (checks official repos first, then AUR)"
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to actually install an official-repository package. Default false performs a dry run. Ignored for AUR packages, which are never installed automatically.",
+                        "default": False
                     }
                 },
                 "required": ["package_name"]
@@ -752,7 +757,7 @@ async def list_tools() -> list[Tool]:
         # Package Removal
         Tool(
             name="remove_packages",
-            description="[LIFECYCLE] Unified tool for removing packages (single or multiple). Accepts either a single package name or a list of packages. Supports removal with dependencies and forced removal. Only works on Arch Linux. Requires sudo access. Examples: packages='firefox', remove_dependencies=true → removes Firefox with its dependencies; packages=['pkg1', 'pkg2', 'pkg3'] → batch removal of multiple packages; packages='lib', force=true → force removal ignoring dependencies (dangerous!).",
+            description="[LIFECYCLE] Unified tool for removing packages (single or multiple). Accepts either a single package name or a list of packages. Defaults to a dry run: with confirm=false (the default) it returns the exact command it would run and removes nothing. Pass confirm=true only after the user has agreed to the specific packages. Only works on Arch Linux. Prompts for the sudo password via a graphical askpass helper. Examples: packages='firefox' → shows the command; packages='firefox', confirm=true → removes it; packages=['pkg1','pkg2'], remove_dependencies=true, confirm=true → batch removal with unused dependencies.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -768,9 +773,9 @@ async def list_tools() -> list[Tool]:
                         "description": "Remove packages and their dependencies (pacman -Rs). Default: false",
                         "default": False
                     },
-                    "force": {
+                    "confirm": {
                         "type": "boolean",
-                        "description": "Force removal ignoring dependencies (pacman -Rdd). Use with caution! Default: false",
+                        "description": "Must be true to actually remove anything. Default false performs a dry run and reports the command.",
                         "default": False
                     }
                 },
@@ -782,7 +787,7 @@ async def list_tools() -> list[Tool]:
         # Orphan Package Management
         Tool(
             name="manage_orphans",
-            description="[MAINTENANCE] Unified tool for managing orphaned packages (dependencies no longer required). Supports two actions: 'list' (show orphaned packages) and 'remove' (remove orphaned packages). Only works on Arch Linux. Requires sudo access for removal. Examples: action='list' → shows all orphaned packages with disk usage; action='remove', dry_run=true → preview what would be removed; action='remove', dry_run=false, exclude=['pkg1'] → remove all orphans except 'pkg1'.",
+            description="[MAINTENANCE] Unified tool for managing orphaned packages (dependencies no longer required). Supports two actions: 'list' (show orphaned packages) and 'remove' (remove orphaned packages). Removing requires BOTH dry_run=false AND confirm=true; the package set is computed at call time, so run the dry run first, show the user the list, and only then confirm. Only works on Arch Linux. Prompts for the sudo password via a graphical askpass helper. Examples: action='list' → shows all orphaned packages with disk usage; action='remove' → previews what would be removed; action='remove', dry_run=false, confirm=true, exclude=['pkg1'] → removes all orphans except 'pkg1'.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -800,11 +805,16 @@ async def list_tools() -> list[Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "List of package names to exclude from removal (only for remove action)"
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true, together with dry_run=false, to actually remove orphans. Default false.",
+                        "default": False
                     }
                 },
                 "required": ["action"]
             },
-            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)  # Mixed: list is read-only, remove is destructive
+            annotations=ToolAnnotations(destructiveHint=True)  # 'remove' can delete packages
         ),
 
         # File Ownership Query (Consolidated)
@@ -897,7 +907,7 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["action"]
             },
-            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)  # Mixed: list is read-only, marking is destructive
+            annotations=ToolAnnotations(destructiveHint=True)  # marking changes the pacman database as root
         ),
 
         # System Diagnostic Tools
@@ -1191,7 +1201,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
             return [TextContent(type="text", text=create_platform_error_message("install_package_secure"))]
         
         package_name = arguments["package_name"]
-        result = await install_package_secure(package_name)
+        confirm = arguments.get("confirm", False)
+        result = await install_package_secure(package_name, confirm)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     
     elif name == "audit_package_security":
@@ -1209,8 +1220,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
         packages = arguments["packages"]
         remove_dependencies = arguments.get("remove_dependencies", False)
-        force = arguments.get("force", False)
-        result = await remove_packages(packages, remove_dependencies, force)
+        confirm = arguments.get("confirm", False)
+        result = await remove_packages(packages, remove_dependencies, confirm)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # Orphan Package Management
@@ -1221,7 +1232,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
         action = arguments["action"]
         dry_run = arguments.get("dry_run", True)
         exclude = arguments.get("exclude", None)
-        result = await manage_orphans(action, dry_run, exclude)
+        confirm = arguments.get("confirm", False)
+        result = await manage_orphans(action, dry_run, exclude, confirm)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     # File Ownership Query

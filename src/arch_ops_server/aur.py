@@ -654,26 +654,34 @@ def _apply_smart_ranking(
         return _apply_smart_ranking(packages, query, "relevance")
 
 
-async def install_package_secure(package_name: str) -> Dict[str, Any]:
+async def install_package_secure(
+    package_name: str,
+    confirm: bool = False
+) -> Dict[str, Any]:
     """
-    Install a package with comprehensive security checks.
-    
-    Workflow:
-    1. Check if package exists in official repos first (safer)
-    2. For AUR packages:
-       a. Fetch package metadata and analyze trust
-       b. Fetch and analyze PKGBUILD for security issues
-       c. Only proceed if security checks pass
-    3. Check for AUR helper availability (paru > yay)
-    4. Install with --noconfirm if all checks pass
-    
+    Install an official-repository package, or audit an AUR package.
+
+    Nothing is installed unless ``confirm`` is True. The default is a dry run
+    that reports what would happen and the exact command it would use, so the
+    decision to touch the system is always a separate, visible step.
+
+    AUR packages are never installed here at any confirm level. A regex scan of
+    a PKGBUILD cannot establish that a build is safe -- it does not see the
+    .install file, the upstream sources, or anything the build fetches at build
+    time -- so this returns the audit and the command for the user to run under
+    their AUR helper's own diff review.
+
     Args:
-        package_name: Package name to install
-    
+        package_name: Package name to install.
+        confirm: Must be True to actually install an official-repository
+                 package. Ignored for AUR packages, which are never installed.
+
     Returns:
-        Dict with installation status and security analysis
+        Dict with the audit, the planned command, and installation status.
     """
-    logger.info(f"Starting secure installation workflow for: {package_name}")
+    logger.info(
+        f"Starting installation workflow for: {package_name} (confirm={confirm})"
+    )
 
     # Only supported on Arch Linux
     if not IS_ARCH:
@@ -692,16 +700,16 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
     result = {
         "package": package_name,
         "installed": False,
+        "confirm": confirm,
         "security_checks": {},
         "messages": []
     }
-    
-    # ========================================================================
-    # STEP 0: Verify a password prompt is available
-    # ========================================================================
-    logger.info("[STEP 0/5] Checking for a graphical password prompt...")
 
-    if not find_askpass():
+    # ========================================================================
+    # STEP 0: If this call would install, verify a password prompt exists
+    # ========================================================================
+    if confirm and not find_askpass():
+        logger.info("Install requested but no askpass helper is available")
         result["messages"].append("⚠️  NO PASSWORD PROMPT AVAILABLE")
         result["messages"].append("")
         result["messages"].append("Installing packages requires root privileges, and this")
@@ -718,8 +726,6 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
         result["messages"].append("with no confirmation.")
         result["security_checks"]["decision"] = "NO_PASSWORD_PROMPT"
         return result
-
-    result["messages"].append("✅ Graphical password prompt available")
 
     # ========================================================================
     # STEP 1: Check if package is in official repos first
@@ -738,16 +744,29 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
         result["security_checks"]["source"] = "official_repository"
         result["security_checks"]["risk_level"] = "LOW"
         result["security_checks"]["recommendation"] = "✅ SAFE - Official repository package"
-        
-        # Install using sudo pacman -S --noconfirm
+
+        # The command this call would run, reported either way so the user can
+        # see exactly what was or would be executed.
+        install_cmd = ["sudo", "pacman", "-S", "--needed", "--noconfirm", "--", package_name]
+        result["command"] = format_command(install_cmd)
+
+        if not confirm:
+            result["messages"].append("⏸️  Not installed: this was a dry run.")
+            result["messages"].append(
+                f"   To install, call this tool again with confirm=true: {result['command']}"
+            )
+            result["security_checks"]["decision"] = "CONFIRMATION_REQUIRED"
+            logger.info(f"Dry run for official package {package_name}; nothing installed")
+            return result
+
         try:
             result["messages"].append("📦 Installing from official repository...")
             exit_code, stdout, stderr = await run_command(
-                ["sudo", "pacman", "-S", "--noconfirm", package_name],
+                install_cmd,
                 timeout=300,  # 5 minutes for installation
                 check=False
             )
-            
+
             if exit_code == 0:
                 result["installed"] = True
                 result["messages"].append(f"✅ Successfully installed {package_name} from official repository")
@@ -854,68 +873,39 @@ async def install_package_secure(package_name: str) -> Dict[str, Any]:
         )
     
     # ========================================================================
-    # STEP 4: Check for AUR helper
+    # STEP 4: Hand the AUR package back to the user for installation
     # ========================================================================
-    logger.info(f"[STEP 5/5] Checking for AUR helper (paru/yay)...")
-    result["messages"].append("🔧 Checking for AUR helper...")
-    
+    # AUR packages are never installed from here. The audit above is a static
+    # scan of one file; it cannot see the .install script, the upstream sources,
+    # or anything the build downloads while it runs. Installing on the strength
+    # of it would turn a weak signal into an unattended root operation.
+    logger.info(f"[STEP 5/5] Reporting AUR install command for {package_name}")
+
     aur_helper = get_aur_helper()
-    
-    if not aur_helper:
-        result["messages"].append("❌ No AUR helper found (paru or yay)")
-        result["messages"].append("   Please install an AUR helper:")
-        result["messages"].append("   - Recommended: paru (pacman -S paru)")
-        result["messages"].append("   - Alternative: yay")
-        result["security_checks"]["decision"] = "NO_HELPER"
-        return result
-    
-    result["messages"].append(f"✅ Using AUR helper: {aur_helper}")
     result["aur_helper"] = aur_helper
-    
-    # ========================================================================
-    # STEP 5: Install package with AUR helper
-    # ========================================================================
-    result["messages"].append(f"📦 Installing {package_name} via {aur_helper} (no confirmation)...")
-    logger.info(f"Installing AUR package {package_name} with {aur_helper}")
-    
-    try:
-        # Install with --noconfirm flag
-        exit_code, stdout, stderr = await run_command(
-            [aur_helper, "-S", "--noconfirm", package_name],
-            timeout=600,  # 10 minutes for AUR package build
-            check=False
-        )
-        
-        if exit_code == 0:
-            result["installed"] = True
-            result["messages"].append(f"✅ Successfully installed {package_name} from AUR")
-            result["security_checks"]["decision"] = "INSTALLED"
-            logger.info(f"Successfully installed AUR package: {package_name}")
-        else:
-            result["messages"].append(f"❌ Installation failed with exit code {exit_code}")
-            result["messages"].append(f"   Error: {stderr}")
-            result["security_checks"]["decision"] = "INSTALL_FAILED"
-            logger.error(f"AUR installation failed for {package_name}: {stderr}")
-            
-            # Check for sudo password issues
-            if "password" in stderr.lower() or "sudo" in stderr.lower():
-                result["messages"].append("")
-                result["messages"].append("⚠️  SUDO PASSWORD REQUIRED")
-                result["messages"].append("To enable passwordless installation for AUR packages:")
-                result["messages"].append("1. For passwordless sudo for pacman:")
-                result["messages"].append("   sudo visudo -f /etc/sudoers.d/arch-aur-install")
-                result["messages"].append("   Add: your_username ALL=(ALL) NOPASSWD: /usr/bin/pacman")
-                result["messages"].append("2. Or run the installation manually in your terminal:")
-                result["messages"].append(f"   {aur_helper} -S {package_name}")
-        
-        result["install_output"] = stdout
-        result["install_errors"] = stderr
-        
-    except Exception as e:
-        logger.error(f"Installation failed: {e}")
-        result["messages"].append(f"❌ Installation exception: {str(e)}")
-        result["security_checks"]["decision"] = "INSTALL_ERROR"
-    
+
+    if aur_helper:
+        result["command"] = format_command([aur_helper, "-S", "--", package_name])
+    else:
+        result["command"] = None
+        result["messages"].append("ℹ️  No AUR helper found (paru or yay).")
+        result["messages"].append("   Install one first: pacman -S paru")
+
+    result["security_checks"]["decision"] = "MANUAL_INSTALL_REQUIRED"
+    result["messages"].append("")
+    result["messages"].append("⏸️  AUR packages are not installed automatically.")
+    result["messages"].append("   The scan above reads the PKGBUILD only. It does not")
+    result["messages"].append("   cover the .install script, the upstream sources, or")
+    result["messages"].append("   anything fetched during the build, so it cannot show")
+    result["messages"].append("   that this package is safe.")
+
+    if aur_helper:
+        result["messages"].append("")
+        result["messages"].append("   Review the recipe and install it in your own terminal:")
+        result["messages"].append(f"     {result['command']}")
+        result["messages"].append("   Keep your helper's diff review enabled and read the")
+        result["messages"].append("   PKGBUILD and .install files before approving the build.")
+
     return result
 
 
