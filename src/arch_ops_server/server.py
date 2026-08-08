@@ -1542,15 +1542,14 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             metadata_risk = analyze_package_metadata_risk(metadata)
             pkgbuild_safety = analyze_pkgbuild_safety(pkgbuild_content)
             
-            # analyze_pkgbuild_safety reports findings in three severity
-            # buckets; there is no combined "findings" key, so counting one
-            # produced zero every time regardless of what the scan found.
+            # Findings come back in three severity buckets. There is no combined
+            # "findings" key, and no boolean verdict: this is a static scan, so
+            # it reports what it matched and never certifies a package.
             red_flags = pkgbuild_safety.get('red_flags', [])
             warnings = pkgbuild_safety.get('warnings', [])
             info = pkgbuild_safety.get('info', [])
 
-            # Both metadata lists hold dicts, not strings; joining them directly
-            # raises TypeError and loses the whole report.
+            # Both lists hold dicts, not strings; joining them directly raises.
             risk_factors = "; ".join(
                 f.get('issue', '') for f in metadata_risk.get('risk_factors', [])
             ) or "none recorded"
@@ -1566,22 +1565,39 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
 - **Risk Factors**: {risk_factors}
 - **Trust Indicators**: {trust_indicators}
 
-## PKGBUILD Security Analysis
+## PKGBUILD Scan
 - **Risk Score**: {pkgbuild_safety.get('risk_score', 'N/A')}/100
-- **Critical Issues**: {len(red_flags)}
-- **Warnings**: {len(warnings)}
-- **Informational**: {len(info)}
+- **Critical patterns matched**: {len(red_flags)}
+- **Suspicious patterns matched**: {len(warnings)}
+- **Informational matches**: {len(info)}
+
+{pkgbuild_safety.get('recommendation', '')}
+
+**What this scan does not cover**: {pkgbuild_safety.get('limitations', '')}
 
 ## Recommendations
 """
-            
-            if metadata_risk.get('trust_score', 0) < 50 or pkgbuild_safety.get('risk_score', 0) > 70:
-                audit_summary += "⚠️ **HIGH RISK** - Consider finding an alternative package or reviewing the source code manually.\n"
-            elif metadata_risk.get('trust_score', 0) < 70 or pkgbuild_safety.get('risk_score', 0) > 50:
-                audit_summary += "⚠️ **MEDIUM RISK** - Proceed with caution and review the findings below.\n"
+
+            if red_flags or metadata_risk.get('trust_score', 0) < 50:
+                audit_summary += (
+                    "⚠️ **Do not install without reading the recipe yourself.** Critical "
+                    "patterns matched, or the package's metadata gives little reason to "
+                    "trust it. Consider an alternative package.\n"
+                )
+            elif warnings or metadata_risk.get('trust_score', 0) < 70:
+                audit_summary += (
+                    "⚠️ **Read the PKGBUILD and .install files before installing.** "
+                    "Suspicious patterns matched, or the metadata is weak.\n"
+                )
             else:
-                audit_summary += "✅ **LOW RISK** - Package appears safe to install.\n"
-            
+                audit_summary += (
+                    "No known-bad patterns matched and the metadata looks ordinary. "
+                    "**This is not evidence that the package is safe** - the scan cannot "
+                    "see the .install script, the upstream sources, or anything the build "
+                    "fetches while it runs. Review the recipe yourself and install it in "
+                    "your own terminal, with your AUR helper's diff review enabled.\n"
+                )
+
             messages = [
                 PromptMessage(
                     role="user",

