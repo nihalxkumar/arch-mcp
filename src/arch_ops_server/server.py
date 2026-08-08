@@ -1458,8 +1458,16 @@ async def get_prompt(name: str, arguments: dict[str, str]) -> GetPromptResult:
             package_info = await get_aur_info(package_name)
             pkgbuild_content = await get_pkgbuild(package_name)
             
+            # get_aur_info wraps its payload in the AUR safety warning, so the
+            # metadata sits under "data". analyze_package_metadata_risk reads
+            # votes, popularity and maintainer from the top level, so handing it
+            # the wrapper reports every package as having zero votes and no
+            # maintainer -- turning a well-maintained package into a HIGH RISK
+            # verdict. install_package_secure unwraps the same way.
+            metadata = package_info.get("data", package_info)
+
             # Analyze both metadata and PKGBUILD
-            metadata_risk = analyze_package_metadata_risk(package_info)
+            metadata_risk = analyze_package_metadata_risk(metadata)
             pkgbuild_safety = analyze_pkgbuild_safety(pkgbuild_content)
             
             # analyze_pkgbuild_safety reports findings in three severity
@@ -1577,14 +1585,18 @@ sudo pacman -S {package_name}
             else:
                 # Check AUR
                 aur_info = await get_aur_info(package_name)
-                if aur_info.get("found"):
+                # get_aur_info returns its payload under "data", and neither
+                # shape carries a "found" key -- so this check was always false
+                # and every AUR package was reported as not existing.
+                aur_pkg = aur_info.get("data", aur_info)
+                if not aur_info.get("error") and aur_pkg.get("name"):
                     analysis = f"""
 # Dependency Analysis for {package_name} (AUR Package)
 
 ## AUR Package Information
-- **Maintainer**: {aur_info.get('maintainer', 'Unknown')}
-- **Last Updated**: {aur_info.get('last_modified', 'Unknown')}
-- **Votes**: {aur_info.get('votes', 'Unknown')}
+- **Maintainer**: {aur_pkg.get('maintainer') or 'Orphaned'}
+- **Last Updated**: {aur_pkg.get('last_modified', 'Unknown')}
+- **Votes**: {aur_pkg.get('votes', 'Unknown')}
 
 ## Installation Considerations
 1. **Security Check**: Run a security audit before installation
